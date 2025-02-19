@@ -157,6 +157,61 @@ command = [ ACESTREAM_BINARY, "--client-console", "--http-port", "33666",
 acestream_process = subprocess.Popen(command, 
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
+# Primero, añadimos una función para reiniciar el proceso acestream
+def restart_acestream():
+    global acestream_process
+    try:
+        if acestream_process:
+            acestream_process.terminate()
+            acestream_process.wait()
+            logger.info("Acestream process terminated")
+    except Exception as e:
+        logger.error(f"Error terminating acestream process: {e}")
+    
+    acestream_process = subprocess.Popen(command, 
+                                       stdout=subprocess.PIPE, 
+                                       stderr=subprocess.PIPE)
+    logger.info("Acestream process restarted")
+    time.sleep(2)
+
+def stream_acestream_content(id):
+    ace_url = f"http://127.0.0.1:33666/ace/getstream?id={id}"
+    session = requests.Session()
+    retry = Retry(
+        total = int(ACESTRAM_RETRY_TOTAL),
+        backoff_factor = float(ACESTREAM_RETRY_BACKOFF_FACTOR),
+        status_forcelist = ACESTREAM_RETRY_STATUS_FORCELIST
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    try:
+        response = session.get(ace_url, stream=True)
+        empty_chunks_count = 0
+        
+        for chunk in response.iter_content(chunk_size=int(ACESTREAM_STREAM_CHUNKSIZE)):
+            if chunk:  # Si el chunk tiene contenido
+                empty_chunks_count = 0
+                yield chunk
+            else:
+                empty_chunks_count += 1
+                
+                # Si recibimos varios chunks vacíos consecutivos, consideramos que el stream está muerto
+                if empty_chunks_count >= 5:  # Puedes ajustar este número según necesites
+                    logger.warning("Stream appears to be dead, restarting acestream...")
+                    restart_acestream()
+                    # Intentar reconectar al stream
+                    response = session.get(ace_url, stream=True)
+                    empty_chunks_count = 0
+                    
+            time.sleep(float(ACESTREAM_POLL_TIME))
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Stream connection error: {e}")
+        restart_acestream()
+        raise
+
 @app.get("/acestream/video")
 async def acestream(request: Request):
     id = request.query_params.get('id')
@@ -164,28 +219,13 @@ async def acestream(request: Request):
         raise HTTPException(status_code=400, detail="id parameter is missing")
 
     if not acestream_process or acestream_process.poll() is not None:
-        raise HTTPException(status_code=500, detail="Video not found")    
+        logger.warning("Acestream process not running, starting it...")
+        restart_acestream()
 
-    def stream_content(id):
-        ace_url = f"http://127.0.0.1:33666/ace/getstream?id={id}"
-        session = requests.Session()
-        retry = Retry(
-            total = int(ACESTRAM_RETRY_TOTAL),
-            backoff_factor = float(ACESTREAM_RETRY_BACKOFF_FACTOR),
-            status_forcelist = ACESTREAM_RETRY_STATUS_FORCELIST
-        )
-        adapter = HTTPAdapter(max_retries=retry)
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)        
-        response = session.get(ace_url, stream=True)
-        for chunk in response.iter_content(chunk_size=int(ACESTREAM_STREAM_CHUNKSIZE)):
-            yield chunk
-            time.sleep(float(ACESTREAM_POLL_TIME))
-            
-    try :
-        return StreamingResponse(stream_content(id), media_type='video/mp4')
+    try:
+        return StreamingResponse(stream_acestream_content(id), media_type='video/mp4')
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Error in acestream endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
 #TEST:
