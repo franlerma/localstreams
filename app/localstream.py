@@ -303,9 +303,11 @@ async def stream_video(request: Request):
 
     start_time = datetime.now()
     logger.info(f"Iniciando stream para {url}")
+    
+    quality = request.query_params.get('quality') if request.query_params.get('quality') else 'best'
 
     proc = await asyncio.create_subprocess_exec(
-        STREAMLINK_BINARY, url, 'best', '--stdout',
+        STREAMLINK_BINARY, url, quality, '--stdout',
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
     )
