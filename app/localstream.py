@@ -8,7 +8,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 import aiohttp
 from aiohttp import ClientSession, ClientTimeout
@@ -291,6 +291,11 @@ async def generate_m3u(request: Request, m3u_file: str):
     except Exception as e:
         logger.error(f"Error generando M3U: {str(e)}")
         raise HTTPException(404, "Archivo M3U no encontrado")
+
+@app.get("/picon/{piconFileName}")
+async def piconFile(piconFileName: str):
+    filename = f"/data/picon/{piconFileName}"
+    return FileResponse(filename, media_type='image/gif')
 
 @app.get("/streamlink/video")
 async def stream_video(request: Request):
