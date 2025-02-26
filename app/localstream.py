@@ -309,7 +309,7 @@ async def stream_video(request: Request):
     start_time = datetime.now()
     logger.info(f"Iniciando stream para {url}")
     
-    quality = request.query_params.get('quality') if request.query_params.get('quality') else 'best'
+    quality = request.query_params.get('quality')[:-1] if request.query_params.get('quality') else 'best'
 
     proc = await asyncio.create_subprocess_exec(
         STREAMLINK_BINARY, url, quality, '--stdout',
@@ -360,7 +360,10 @@ async def ace_stream(request: Request):
     if not stream_id or len(stream_id) != 40 or not re.match(r"^[a-fA-F0-9]+$", stream_id):
         raise HTTPException(400, "ID de stream inválido")
 
-    ace_url = f"http://127.0.0.1:33666/ace/getstream?id={stream_id}"
+    ace_url = f"http://127.0.0.1:33666/ace/getstream?content_id={stream_id}"
+
+    if request.query_params.get('quality') and request.query_params.get('quality') != 'best':
+        ace_url += f"&quality={request.query_params.get('quality')[:-1]}"
 
     async def stream_with_retries():
         for attempt in range(ACESTREAM_RETRY_TOTAL):
