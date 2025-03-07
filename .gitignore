@@ -153,3 +153,5 @@ cython_debug/
 ace-test
 .DS_Store
 acestream-armv7-master
+data/m3u/*
+!data/m3u/test.m3u
