@@ -410,7 +410,7 @@ async def ace_stream(request: Request):
             if response.status != 200:
                 raise HTTPException(502, "Error en el servidor upstream")
 
-            for chunk in response.iter_content(chunk_size=int(ACESTREAM_STREAM_CHUNKSIZE)):
+            for chunk in response.content.iter_content(chunk_size=int(ACESTREAM_STREAM_CHUNKSIZE)):
                 yield chunk
                 time.sleep(float(1000))
     
