@@ -408,7 +408,7 @@ async def ace_stream(request: Request):
                     attempt = 0
                     await manager.restart_service()
                     await asyncio.sleep(backoff)
-
+    
                 
 
     try:
