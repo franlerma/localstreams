@@ -170,13 +170,13 @@ async def shutdown(app: FastAPI):
     logger.info("Iniciando apagado controlado...")
 
     # Detener health monitor
-    logger.info("Deteniendo monitor de salud...")
-    if manager.monitor_task and not manager.monitor_task.done():
-        manager.monitor_task.cancel()
-        try:
-            await manager.monitor_task
-        except asyncio.CancelledError:
-            logger.debug("Tarea de monitor de salud cancelada correctamente")
+    # logger.info("Deteniendo monitor de salud...")
+    # if manager.monitor_task and not manager.monitor_task.done():
+    #     manager.monitor_task.cancel()
+    #     try:
+    #         await manager.monitor_task
+    #     except asyncio.CancelledError:
+    #         logger.debug("Tarea de monitor de salud cancelada correctamente")
 
     # Detener tareas en segundo plano
     # logger.info("Deteniendo tareas en segundo plano...")
