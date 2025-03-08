@@ -8,7 +8,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 import aiohttp
 from aiohttp import ClientSession, ClientTimeout
@@ -22,7 +22,9 @@ def get_env(key: str, default: str, type_cast: type = str) -> str:
         logging.error(f"Valor inválido para {key}: {value}. Usando default.")
         return type_cast(default)
 
-ACESTREAM_CACHE_DIR = "/tmp/acestream-cache"
+ACESTREAM_ENGINE_PORT = get_env("ACESTREAM_ENGINE_PORT", "8621", int)
+ACESTREAM_PROXY_PORT = get_env("ACESTREAM_PROXY_PORT", "33666", int)
+ACESTREAM_CACHE_DIR = get_env("ACESTREAM_CACHE_DIR", "/tmp/acestream-cache", str)
 APP_PORT = get_env("ACESTREAM_APP_PORT", "15123", int)
 STREAMLINK_BINARY = get_env("ACESTREAM_STREAMLINK_BINARY", "/app/venv/bin/streamlink", str)
 ACESTREAM_BINARY = get_env("ACESTREAM_BINARY", "/opt/acestream/acestreamengine", str)
@@ -35,9 +37,6 @@ ACESTREAM_RETRY_TOTAL = get_env("ACESTREAM_RETRY_TOTAL", "5", int)
 ACESTREAM_STREAM_CHUNKSIZE = get_env("ACESTREAM_STREAM_CHUNKSIZE", "4096", int)
 MAX_CONNECTIONS = get_env("ACESTREAM_MAX_CONNECTIONS", "100", int)
 CACHE_TTL = get_env("ACESTREAM_CACHE_TTL", "300", int)
-
-# Limpieza inicial de cache
-shutil.rmtree(ACESTREAM_CACHE_DIR, ignore_errors=True)
 
 # Configuración de logging estructurado
 logging.basicConfig(
@@ -65,10 +64,9 @@ class AceStreamManager:
             ACESTREAM_BINARY,
             "--use-ffmpeg=1",
             "--client-console",
-            "--port", "8621",
-            "--http-port", "33666",
+            "--port", f"{ACESTREAM_ENGINE_PORT}",
+            "--http-port", f"{ACESTREAM_PROXY_PORT}",
             "--cache-dir", ACESTREAM_CACHE_DIR,
-            #"--cache-limit", ACESTREAM_CACHE_LIMIT,
             "--bind-all",
             ACESTREAM_ARGS
         ]
@@ -82,7 +80,6 @@ class AceStreamManager:
             raise
 
     async def wait_until_healthy(self, timeout: int = 30):
-        """Espera hasta que el servicio esté saludable"""
         start_time = time.monotonic()
         while time.monotonic() - start_time < timeout:
             if await self.check_health():
@@ -91,10 +88,9 @@ class AceStreamManager:
         raise TimeoutError("El servicio no se inició correctamente")
 
     async def check_health(self) -> bool:
-        """Verificación mejorada del estado del servicio"""
         try:
             async with self.http_session.get(
-                "http://127.0.0.1:33666/webui/api/service/version",
+                f"http://127.0.0.1:{ACESTREAM_PROXY_PORT}/webui/api/service/version",
                 timeout=ClientTimeout(total=3)
             ) as response:
                 return response.status == 200
@@ -106,17 +102,18 @@ class AceStreamManager:
         if not self.acestream_process.isempty():
             return
         
-        command = [
-            "rm",
-            "-rf",
-            ACESTREAM_CACHE_DIR
-        ]
+        # command = [
+        #     "rm",
+        #     "-rf",
+        #     ACESTREAM_CACHE_DIR
+        # ]
 
-        try:
-            logger.info(f"Limpiando la caché...")
-            await asyncio.create_subprocess_exec(*command)
-        except Exception as e:
-            logger.error(f"Error al limpiar la caché: {str(e)}")
+        # try:
+        #     logger.info(f"Limpiando la caché...")
+        #     await asyncio.create_subprocess_exec(*command)
+        # except Exception as e:
+        #     logger.error(f"Error al limpiar la caché: {str(e)}")
+        shutil.rmtree(ACESTREAM_CACHE_DIR, ignore_errors=True)
 
     async def restart_service(self):
         """Reinicio controlado con gestión de errores mejorada"""
@@ -311,6 +308,11 @@ async def generate_m3u(request: Request, m3u_file: str):
         logger.error(f"Error generando M3U: {str(e)}")
         raise HTTPException(404, "Archivo M3U no encontrado")
 
+@app.get("/check_health")
+async def health():
+    healthy = await manager.check_health()
+    return JSONResponse({"healthy": healthy})
+
 @app.get("/picon/{piconFileName}")
 async def piconFile(piconFileName: str):
     filename = f"/data/picon/{piconFileName}"
@@ -379,7 +381,7 @@ async def ace_stream(request: Request):
     if not stream_id or len(stream_id) != 40 or not re.match(r"^[a-fA-F0-9]+$", stream_id):
         raise HTTPException(400, "ID de stream inválido")
 
-    ace_url = f"http://127.0.0.1:33666/ace/getstream?content_id={stream_id}"
+    ace_url = f"http://127.0.0.1:{ACESTREAM_PROXY_PORT}/ace/getstream?content_id={stream_id}"
 
     if request.query_params.get('quality') and request.query_params.get('quality') != 'best':
         ace_url += f"&quality={request.query_params.get('quality')[:-1]}"
