@@ -314,7 +314,7 @@ async def ace_stream(request: Request):
     async def stream_content():
         attempts = 0
         while True:
-            async with manager.http_session.get(ace_url, stream=True) as response:
+            async with manager.http_session.get(ace_url) as response:
                 if response.status != 200 :
                     attempts += 1
                     if attempts < ACESTREAM_RETRY_TOTAL:
