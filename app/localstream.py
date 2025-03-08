@@ -80,7 +80,7 @@ class AceStreamManager:
         try:
             self.acestream_process = await asyncio.create_subprocess_exec(*command)
             logger.info(f"Acestream iniciado con PID: {self.acestream_process.pid}")
-            await self.wait_until_healthy()
+            await self.__wait_until_healthy()
         except Exception as e:
             logger.error(f"Error crítico al iniciar Acestream: {str(e)}")
             raise
@@ -105,6 +105,8 @@ class AceStreamManager:
             return False
 
     async def clean_cache(self) -> None:
+        if ACESTREAM_PROXY_HOST != "127.0.0.1":
+            return
         if self.acestream_process and not self.acestream_process.isempty():
             return
         shutil.rmtree(ACESTREAM_CACHE_DIR, ignore_errors=True)
