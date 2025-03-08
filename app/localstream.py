@@ -60,10 +60,10 @@ class AceStreamManager:
         if ACESTREAM_PROXY_HOST != "127.0.0.1":
             return None
         else :
-            self.__start_acestream()
+            await self.__start_acestream()
 
     async def __start_acestream(self):
-        self.clean_cache()
+        await self.clean_cache()
         
         command = [
             ACESTREAM_BINARY,
