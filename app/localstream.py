@@ -54,8 +54,8 @@ class AceStreamManager:
         self.app: Optional[FastAPI] = None
         self.http_session: Optional[ClientSession] = None
         self.acestream_process: Optional[asyncio.subprocess.Process] = None
-        self.monitor_task: Optional[asyncio.Task] = None
-        self.cleanup_task: Optional[asyncio.Task] = None
+        # self.monitor_task: Optional[asyncio.Task] = None
+        # self.cleanup_task: Optional[asyncio.Task] = None
 
     async def start_acestream(self):
         self.clean_cache()
@@ -179,15 +179,15 @@ async def shutdown(app: FastAPI):
             logger.debug("Tarea de monitor de salud cancelada correctamente")
 
     # Detener tareas en segundo plano
-    logger.info("Deteniendo tareas en segundo plano...")
-    tasks = [manager.monitor_task, manager.cleanup_task]
-    for task in tasks:
-        if task and not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                logger.debug("Tarea cancelada correctamente")
+    # logger.info("Deteniendo tareas en segundo plano...")
+    # tasks = [manager.monitor_task, manager.cleanup_task]
+    # for task in tasks:
+    #     if task and not task.done():
+    #         task.cancel()
+    #         try:
+    #             await task
+    #         except asyncio.CancelledError:
+    #             logger.debug("Tarea cancelada correctamente")
 
     # Detener proceso Acestream
     logger.info("Deteniendo proceso Acestream...")
