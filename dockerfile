@@ -20,7 +20,7 @@ COPY resources /tmp
 SHELL ["/bin/bash", "-c" ]
 
 RUN sed -i 's/deb http:\/\/security.ubuntu.com/#/g' /etc/apt/sources.list
-#RUN apt-get update
+RUN apt-get update
 RUN apt-get install --no-install-recommends -yq \
     ffmpeg python3-pip libpython3.10 python3-pip python3-virtualenv python3-venv ca-certificates wget sqlite3 net-tools \
       && rm -rf /var/lib/apt/lists/* \
