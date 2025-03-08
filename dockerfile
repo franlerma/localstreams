@@ -11,6 +11,7 @@ ENV LANG="C.UTF-8"
 ENV ACESTREAM_VERSION="3.2.3_ubuntu_22.04_x86_64_py3.10" 
 ENV ACESTREAM_TGZ="acestream_${ACESTREAM_VERSION}.tar.gz"
 ENV ACESTREAM_TGZ_URL="https://download.acestream.media/linux/${ACESTREAM_TGZ}"
+ENV ACEXY_LISTEN_ADDR=":8063"
 
 WORKDIR /tmp
 COPY app /app
