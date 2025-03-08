@@ -34,4 +34,4 @@ RUN /app/venv/bin/pip install -r /app/requirements.txt
 ENTRYPOINT /app/venv/bin/python -u /app/localstream.py
 
 EXPOSE 15123/tcp 15123/udp
-
+EXPOSE 8621/tcp 8621/udp

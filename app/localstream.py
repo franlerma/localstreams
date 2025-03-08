@@ -63,7 +63,9 @@ class AceStreamManager:
         
         command = [
             ACESTREAM_BINARY,
+            "--use-ffmpeg=1",
             "--client-console",
+            "--port", "8621",
             "--http-port", "33666",
             "--cache-dir", ACESTREAM_CACHE_DIR,
             #"--cache-limit", ACESTREAM_CACHE_LIMIT,
