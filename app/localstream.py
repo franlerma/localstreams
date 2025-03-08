@@ -33,7 +33,7 @@ ACESTREAM_ARGS = get_env("ACESTREAM_ARGS", "", str)
 M3U_DIR = get_env("ACESTREAM_M3U_DIR", "/data/m3u", str)
 LOG_LEVEL = get_env("ACESTREAM_LOG_LEVEL", "INFO", str)
 ACESTREAM_RETRY_BACKOFF_FACTOR = get_env("ACESTREAM_RETRY_BACKOFF_FACTOR", "2.0", float)
-ACESTREAM_RETRY_TOTAL = get_env("ACESTREAM_RETRY_TOTAL", "5", int)
+ACESTREAM_RETRY_TOTAL = get_env("ACESTREAM_RETRY_TOTAL", "10", int)
 ACESTREAM_STREAM_CHUNKSIZE = get_env("ACESTREAM_STREAM_CHUNKSIZE", "4096", int)
 MAX_CONNECTIONS = get_env("ACESTREAM_MAX_CONNECTIONS", "100", int)
 CACHE_TTL = get_env("ACESTREAM_CACHE_TTL", "300", int)
@@ -374,7 +374,6 @@ async def stream_video(request: Request):
 
 @app.get("/acestream/video")
 async def ace_stream(request: Request):
-    """Streaming Acestream con reintentos inteligentes"""
     stream_id = request.query_params.get('id')
 
     # Validación mejorada del ID
@@ -387,7 +386,9 @@ async def ace_stream(request: Request):
         ace_url += f"&quality={request.query_params.get('quality')[:-1]}"
 
     async def stream_with_retries():
-        for attempt in range(ACESTREAM_RETRY_TOTAL):
+        #for attempt in range(ACESTREAM_RETRY_TOTAL):
+        attempt = 0
+        while True :
             try:
                 async with manager.http_session.get(ace_url) as response:
                     if response.status != 200:
@@ -398,13 +399,17 @@ async def ace_stream(request: Request):
                     return
 
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                logger.warning(f"Intento {attempt + 1} fallido: {str(e)}")
-                if attempt >= ACESTREAM_RETRY_TOTAL - 1:
-                    raise
-
+                attempt += 1
+                logger.warning(f"Intento {attempt} fallido: {str(e)}")
                 backoff = ACESTREAM_RETRY_BACKOFF_FACTOR ** (attempt + 1)
                 await asyncio.sleep(backoff)
-                await manager.restart_service()
+                
+                if attempt >= ACESTREAM_RETRY_TOTAL :
+                    attempt = 0
+                    await manager.restart_service()
+                    await asyncio.sleep(backoff)
+                    
+                
 
     try:
         return StreamingResponse(
