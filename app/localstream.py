@@ -23,22 +23,24 @@ def get_env(key: str, default: str, type_cast: type = str) -> str:
         logging.error(f"Valor inválido para {key}: {value}. Usando default.")
         return type_cast(default)
 
+ACEXY_LISTEN_ADDR = get_env("ACEXY_LISTEN_ADDR", ":8080", str)
+
 ACESTREAM_PROXY_HOST = get_env("ACESTREAM_PROXY_HOST", "127.0.0.1", str)
-ACESTREAM_ENGINE_PORT = get_env("ACESTREAM_ENGINE_PORT", "8621", int)
-ACESTREAM_PROXY_PORT = get_env("ACESTREAM_PROXY_PORT", "33666", int)
+ACESTREAM_PROXY_PORT = get_env("ACESTREAM_PROXY_PORT", ACEXY_LISTEN_ADDR.split(":")[1], int)
+ACESTREAM_CACHE_LIMIT = get_env("ACESTREAM_CACHE_LIMIT", "1", str)
+ACESTREAM_ARGS = get_env("ACESTREAM_ARGS", "", str)
+ACESTREAM_RETRY_BACKOFF_FACTOR = get_env("ACESTREAM_RETRY_BACKOFF_FACTOR", "2.0", float)
+ACESTREAM_RETRY_TOTAL = get_env("ACESTREAM_RETRY_TOTAL", "10", int)
+ACESTREAM_STREAM_CHUNKSIZE = get_env("ACESTREAM_STREAM_CHUNKSIZE", "8192", int)
+
 ACESTREAM_CACHE_DIR = get_env("ACESTREAM_CACHE_DIR", "/tmp/acestream-cache", str)
 APP_PORT = get_env("ACESTREAM_APP_PORT", "15123", int)
 STREAMLINK_BINARY = get_env("ACESTREAM_STREAMLINK_BINARY", "/app/venv/bin/streamlink", str)
-ACESTREAM_BINARY = get_env("ACESTREAM_BINARY", "/opt/acestream/acestreamengine", str)
-ACESTREAM_CACHE_LIMIT = get_env("ACESTREAM_CACHE_LIMIT", "1", str)
-ACESTREAM_ARGS = get_env("ACESTREAM_ARGS", "", str)
-M3U_DIR = get_env("ACESTREAM_M3U_DIR", "/data/m3u", str)
-LOG_LEVEL = get_env("ACESTREAM_LOG_LEVEL", "INFO", str)
-ACESTREAM_RETRY_BACKOFF_FACTOR = get_env("ACESTREAM_RETRY_BACKOFF_FACTOR", "2.0", float)
-ACESTREAM_RETRY_TOTAL = get_env("ACESTREAM_RETRY_TOTAL", "10", int)
-ACESTREAM_STREAM_CHUNKSIZE = get_env("ACESTREAM_STREAM_CHUNKSIZE", "4096", int)
-MAX_CONNECTIONS = get_env("ACESTREAM_MAX_CONNECTIONS", "100", int)
-CACHE_TTL = get_env("ACESTREAM_CACHE_TTL", "300", int)
+
+M3U_DIR = get_env("APP_M3U_DIR", "/data/m3u", str)
+LOG_LEVEL = get_env("APP_LOG_LEVEL", "INFO", str)
+
+MAX_CONNECTIONS = get_env("APP_MAX_CONNECTIONS", "100", int)
 
 # Configuración de logging estructurado
 logging.basicConfig(
@@ -56,6 +58,7 @@ class AceStreamManager:
         self.app: Optional[FastAPI] = None
         self.http_session: Optional[ClientSession] = None
         self.acestream_process: Optional[asyncio.subprocess.Process] = None
+        self.acexy_process: Optional[asyncio.subprocess.Process] = None
 
     async def start_acestream(self):
         if ACESTREAM_PROXY_HOST != "127.0.0.1":
@@ -67,20 +70,27 @@ class AceStreamManager:
     async def __start_acestream(self):
         await self.clean_cache()
         
-        command = [
-            ACESTREAM_BINARY,
-            "--use-ffmpeg=1",
-            "--client-console",
-            "--port", f"{ACESTREAM_ENGINE_PORT}",
-            "--http-port", f"{ACESTREAM_PROXY_PORT}",
-            "--cache-dir", ACESTREAM_CACHE_DIR,
-            "--bind-all",
-            ACESTREAM_ARGS
-        ]
+        # command = [
+        #     ACESTREAM_BINARY,
+        #     "--use-ffmpeg=1",
+        #     "--client-console",
+        #     "--port", f"{ACESTREAM_ENGINE_PORT}",
+        #     "--http-port", f"{ACESTREAM_PROXY_PORT}",
+        #     "--cache-dir", ACESTREAM_CACHE_DIR,
+        #     "--bind-all",
+        #     ACESTREAM_ARGS
+        # ]
+
+        command_ace_engine = [ "/bin/bash", "/run.sh", "&" ]
+        command_acexy = [ "/acexy" ]
 
         try:
-            self.acestream_process = await asyncio.create_subprocess_exec(*command)
-            logger.info(f"Acestream iniciado con PID: {self.acestream_process.pid}")
+            self.acestream_process = await asyncio.create_subprocess_exec(*command_ace_engine)
+            logger.info(f"Ace Engine iniciado con PID: {self.acestream_process.pid}")
+            
+            self.acexy_process = await asyncio.create_subprocess_exec(*command_acexy)
+            logger.info(f"Acexy iniciado con PID: {self.acestream_process.pid}")
+            
             await self.__wait_until_healthy()
         except Exception as e:
             logger.error(f"Error crítico al iniciar Acestream: {str(e)}")
@@ -97,7 +107,7 @@ class AceStreamManager:
     async def check_health(self) -> bool:
         try:
             async with self.http_session.get(
-                f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/webui/api/service/version",
+                f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/ace/status",
                 timeout=ClientTimeout(total=3)
             ) as response:
                 return response.status == 200
@@ -311,7 +321,7 @@ async def ace_stream(request: Request):
     if not stream_id or len(stream_id) != 40 or not re.match(r"^[a-fA-F0-9]+$", stream_id):
         raise HTTPException(400, "ID de stream inválido")
 
-    ace_url = f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/ace/getstream?content_id={stream_id}"
+    ace_url = f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/ace/getstream?id={stream_id}"
 
     if request.query_params.get('quality') and request.query_params.get('quality') != 'best':
         ace_url += f"&quality={request.query_params.get('quality')[:-1]}"
