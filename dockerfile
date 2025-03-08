@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM --platform=linux/amd64 ubuntu:22.04
 
 LABEL \
     com.centurylinklabs.watchtower.enable="false" \
@@ -21,16 +21,14 @@ SHELL ["/bin/bash", "-c" ]
 
 RUN sed -i 's/deb http:\/\/security.ubuntu.com/#/g' /etc/apt/sources.list
 RUN apt-get update
-RUN set -ex;\
-    apt-get install --no-install-recommends -yq \
-    ffmpeg python3-pip libpython3.10 ffmpeg python3-pip python3-virtualenv python3-venv ca-certificates wget sqlite3 net-tools sudo\
+RUN apt-get install --no-install-recommends -yq \
+    ffmpeg python3-pip libpython3.10 python3-pip python3-virtualenv python3-venv ca-certificates wget sqlite3 net-tools \
       && rm -rf /var/lib/apt/lists/* \
-      && mkdir acestream \
-      && tar zxf "${ACESTREAM_TGZ}" -C acestream \
+      && mkdir /opt/acestream \
+      && tar zxf "${ACESTREAM_TGZ}" -C /opt/acestream \
       && rm "${ACESTREAM_TGZ}" \
-      && mv acestream /opt/acestream \
       && pushd /opt/acestream || exit \
-      && bash ./install_dependencies.sh \
+      && python3.10 -m pip install -r requirements.txt \
       && /opt/acestream/start-engine --version \
       && popd || exit
 

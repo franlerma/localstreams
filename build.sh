@@ -3,7 +3,7 @@ PROJECT_NAME="localstreams"
 IMAGE_NAME="franlerma/$PROJECT_NAME"
 #export DOCKER_BUILDKIT=1
 docker build . -t $IMAGE_NAME || exit 1
-docker run -it --name localstreams --publish 15123:15123 --publish 8621:8621 \
+docker run -it --name localstreams \
     --network host \
     -l com.centurylinklabs.watchtower.enable=false -l wud.watch=false --restart always \
     -v /dev/dri:/dev/dri -v /opt/docker/volumes/localstreams/m3u:/data/m3u  \
