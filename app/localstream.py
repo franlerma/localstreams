@@ -157,10 +157,6 @@ async def lifespan(app: FastAPI):
         logger.critical(f"No se pudo iniciar el servicio: {str(e)}")
         raise
 
-    # Tareas en segundo plano
-    #manager.monitor_task = asyncio.create_task(health_monitor())
-    #manager.cleanup_task = asyncio.create_task(cache_cleaner())
-
     yield
 
     # Finalización ordenada
@@ -168,26 +164,6 @@ async def lifespan(app: FastAPI):
 
 async def shutdown(app: FastAPI):
     logger.info("Iniciando apagado controlado...")
-
-    # Detener health monitor
-    # logger.info("Deteniendo monitor de salud...")
-    # if manager.monitor_task and not manager.monitor_task.done():
-    #     manager.monitor_task.cancel()
-    #     try:
-    #         await manager.monitor_task
-    #     except asyncio.CancelledError:
-    #         logger.debug("Tarea de monitor de salud cancelada correctamente")
-
-    # Detener tareas en segundo plano
-    # logger.info("Deteniendo tareas en segundo plano...")
-    # tasks = [manager.monitor_task, manager.cleanup_task]
-    # for task in tasks:
-    #     if task and not task.done():
-    #         task.cancel()
-    #         try:
-    #             await task
-    #         except asyncio.CancelledError:
-    #             logger.debug("Tarea cancelada correctamente")
 
     # Detener proceso Acestream
     logger.info("Deteniendo proceso Acestream...")
@@ -208,48 +184,6 @@ async def shutdown(app: FastAPI):
     logger.info("Apagado completado correctamente")
     os._exit(0)
 
-# async def health_monitor():
-#     """Monitor de salud con backoff exponencial y jitter"""
-#     from random import uniform
-#     retry_count = 0
-
-#     while True:
-#         try:
-#             healthy = await manager.check_health()
-#             if not healthy:
-#                 logger.warning("Servicio no responde, intentando reinicio...")
-#                 try:
-#                     await manager.restart_service()
-#                     retry_count = 0
-#                 except Exception as e:
-#                     logger.error(f"Error en reinicio: {str(e)}")
-#                     retry_count = min(retry_count + 1, 5)
-
-#             # Backoff exponencial con jitter
-#             sleep_time = min(2 ** retry_count * ACESTREAM_RETRY_BACKOFF_FACTOR, 30)
-#             jitter = sleep_time * 0.1 * uniform(-1, 1)
-#             await asyncio.sleep(sleep_time + jitter)
-
-#         except asyncio.CancelledError:
-#             return
-#         except Exception as e:
-#             logger.error(f"Error en monitor de salud: {str(e)}")
-#             await asyncio.sleep(5)
-
-# async def cache_cleaner():
-#     while True:
-#         try:
-#             await asyncio.sleep(60)
-#             # Limpieza adicional de directorio cache
-#             if os.path.exists(ACESTREAM_CACHE_DIR):
-#                 total_size = sum(f.stat().st_size for f in os.scandir(ACESTREAM_CACHE_DIR) if f.is_file())
-#                 logger.debug(f"Tamaño total de caché: {total_size / 1024:.2f} KB")
-#             return
-#         except asyncio.CancelledError:
-#             return
-#         except Exception as e:
-#             logger.error(f"Error en limpieza de caché: {str(e)}")
-#             await asyncio.sleep(10)
 
 app = FastAPI(lifespan=lifespan)
 
@@ -381,29 +315,6 @@ async def ace_stream(request: Request):
 
     if request.query_params.get('quality') and request.query_params.get('quality') != 'best':
         ace_url += f"&quality={request.query_params.get('quality')[:-1]}"
-
-    # async def stream_with_retries():
-    #     #for attempt in range(ACESTREAM_RETRY_TOTAL):
-    #     attempt = 0
-    #     while True :
-    #         try:
-    #             async with manager.http_session.get(ace_url) as response:
-    #                 if response.status != 200:
-    #                     raise HTTPException(502, "Error en el servidor upstream")
-
-    #                 async for chunk in response.content.iter_chunked(ACESTREAM_STREAM_CHUNKSIZE):
-    #                     yield chunk
-    #                 return
-
-    #         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-    #             attempt += 1
-    #             logger.warning(f"Intento {attempt} fallido: {str(e)}")
-    #             await asyncio.sleep(350)
-                
-    #             # if attempt >= ACESTREAM_RETRY_TOTAL and not manager.check_health():
-    #             #     attempt = 0
-    #             #     await manager.restart_service()
-    #             #     await asyncio.sleep(3000)
 
     async def stream_content():
         async with manager.http_session.get(ace_url) as response:

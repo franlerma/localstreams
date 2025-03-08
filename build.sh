@@ -1,7 +1,7 @@
 #!/bin/bash
 PROJECT_NAME="localstreams"
 IMAGE_NAME="franlerma/$PROJECT_NAME"
-#export DOCKER_BUILDKIT=1
+export DOCKER_BUILDKIT=0
 docker build . -t $IMAGE_NAME || exit 1
 docker run -it --name localstreams \
     --network host \
