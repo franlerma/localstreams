@@ -116,7 +116,6 @@ class AceStreamManager:
         shutil.rmtree(ACESTREAM_CACHE_DIR, ignore_errors=True)
 
     async def restart_service(self):
-        """Reinicio controlado con gestión de errores mejorada"""
         logger.info("Iniciando reinicio del servicio...")
 
         # Detener proceso actual
@@ -160,7 +159,7 @@ async def lifespan(app: FastAPI):
 
     # Tareas en segundo plano
     #manager.monitor_task = asyncio.create_task(health_monitor())
-    manager.cleanup_task = asyncio.create_task(cache_cleaner())
+    #manager.cleanup_task = asyncio.create_task(cache_cleaner())
 
     yield
 
@@ -209,49 +208,48 @@ async def shutdown(app: FastAPI):
     logger.info("Apagado completado correctamente")
     os._exit(0)
 
-async def health_monitor():
-    """Monitor de salud con backoff exponencial y jitter"""
-    from random import uniform
-    retry_count = 0
+# async def health_monitor():
+#     """Monitor de salud con backoff exponencial y jitter"""
+#     from random import uniform
+#     retry_count = 0
 
-    while True:
-        try:
-            healthy = await manager.check_health()
-            if not healthy:
-                logger.warning("Servicio no responde, intentando reinicio...")
-                try:
-                    await manager.restart_service()
-                    retry_count = 0
-                except Exception as e:
-                    logger.error(f"Error en reinicio: {str(e)}")
-                    retry_count = min(retry_count + 1, 5)
+#     while True:
+#         try:
+#             healthy = await manager.check_health()
+#             if not healthy:
+#                 logger.warning("Servicio no responde, intentando reinicio...")
+#                 try:
+#                     await manager.restart_service()
+#                     retry_count = 0
+#                 except Exception as e:
+#                     logger.error(f"Error en reinicio: {str(e)}")
+#                     retry_count = min(retry_count + 1, 5)
 
-            # Backoff exponencial con jitter
-            sleep_time = min(2 ** retry_count * ACESTREAM_RETRY_BACKOFF_FACTOR, 30)
-            jitter = sleep_time * 0.1 * uniform(-1, 1)
-            await asyncio.sleep(sleep_time + jitter)
+#             # Backoff exponencial con jitter
+#             sleep_time = min(2 ** retry_count * ACESTREAM_RETRY_BACKOFF_FACTOR, 30)
+#             jitter = sleep_time * 0.1 * uniform(-1, 1)
+#             await asyncio.sleep(sleep_time + jitter)
 
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            logger.error(f"Error en monitor de salud: {str(e)}")
-            await asyncio.sleep(5)
+#         except asyncio.CancelledError:
+#             return
+#         except Exception as e:
+#             logger.error(f"Error en monitor de salud: {str(e)}")
+#             await asyncio.sleep(5)
 
-async def cache_cleaner():
-    """Limpieza periódica de caché con registro detallado"""
-    while True:
-        try:
-            await asyncio.sleep(60)
-            # Limpieza adicional de directorio cache
-            if os.path.exists(ACESTREAM_CACHE_DIR):
-                total_size = sum(f.stat().st_size for f in os.scandir(ACESTREAM_CACHE_DIR) if f.is_file())
-                logger.debug(f"Tamaño total de caché: {total_size / 1024:.2f} KB")
-            return
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            logger.error(f"Error en limpieza de caché: {str(e)}")
-            await asyncio.sleep(10)
+# async def cache_cleaner():
+#     while True:
+#         try:
+#             await asyncio.sleep(60)
+#             # Limpieza adicional de directorio cache
+#             if os.path.exists(ACESTREAM_CACHE_DIR):
+#                 total_size = sum(f.stat().st_size for f in os.scandir(ACESTREAM_CACHE_DIR) if f.is_file())
+#                 logger.debug(f"Tamaño total de caché: {total_size / 1024:.2f} KB")
+#             return
+#         except asyncio.CancelledError:
+#             return
+#         except Exception as e:
+#             logger.error(f"Error en limpieza de caché: {str(e)}")
+#             await asyncio.sleep(10)
 
 app = FastAPI(lifespan=lifespan)
 
@@ -283,7 +281,6 @@ async def security_headers_middleware(request: Request, call_next):
 # Endpoints mejorados
 @app.get("/m3u/{m3u_file}.m3u")
 async def generate_m3u(request: Request, m3u_file: str):
-
     try:
         hostname = request.base_url.hostname
         port = request.base_url.port
