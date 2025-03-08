@@ -59,7 +59,8 @@ class AceStreamManager:
         self.cleanup_task: Optional[asyncio.Task] = None
 
     async def start_acestream(self):
-        """Inicia el proceso Acestream con gestión de errores mejorada"""
+        self.clean_cache()
+        
         command = [
             ACESTREAM_BINARY,
             "--client-console",
@@ -98,6 +99,22 @@ class AceStreamManager:
         except Exception as e:
             logger.debug(f"Error de salud: {str(e)}")
             return False
+
+    async def clean_cache(self) -> None:
+        if not self.acestream_process.isempty():
+            return
+        
+        command = [
+            "rm",
+            "-rf",
+            ACESTREAM_CACHE_DIR
+        ]
+
+        try:
+            logger.info(f"Limpiando la caché...")
+            await asyncio.create_subprocess_exec(*command)
+        except Exception as e:
+            logger.error(f"Error al limpiar la caché: {str(e)}")
 
     async def restart_service(self):
         """Reinicio controlado con gestión de errores mejorada"""

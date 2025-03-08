@@ -17,11 +17,6 @@ COPY resources /tmp
 
 SHELL ["/bin/bash", "-c" ]
 
-#FIX DNS IN CASE DOMAINS ARE BLOCKED
-RUN echo "67.215.246.10 router.bittorrent.com" >> /etc/hosts
-RUN echo "67.215.246.10 router.utorrent.com" >> /etc/hosts
-RUN echo "82.221.103.244 router.utorrent.com" >> /etc/hosts
-
 RUN apt-get update
 RUN apt-get install --no-install-recommends -y \
 python3-pip libpython3.10 ffmpeg python3-pip python3-virtualenv python3-venv ca-certificates wget sudo\
