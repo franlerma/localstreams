@@ -58,6 +58,7 @@ class AceStreamManager:
 
     async def start_acestream(self):
         if ACESTREAM_PROXY_HOST != "127.0.0.1":
+            self.acestream_process = Optional.empty()
             return None
         else :
             await self.__start_acestream()
@@ -104,12 +105,12 @@ class AceStreamManager:
             return False
 
     async def clean_cache(self) -> None:
-        if not self.acestream_process.isempty():
+        if self.acestream_process and not self.acestream_process.isempty():
             return
         shutil.rmtree(ACESTREAM_CACHE_DIR, ignore_errors=True)
 
     async def restart_service(self):
-        if not self.acestream_process.isempty():
+        if self.acestream_process and not self.acestream_process.isempty():
             return
         await self.__restart_service()
 
