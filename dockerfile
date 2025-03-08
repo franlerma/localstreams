@@ -30,12 +30,10 @@ RUN apt-get install --no-install-recommends -yq \
       && pushd /opt/acestream || exit \
       && python3.10 -m pip install -r requirements.txt \
       && /opt/acestream/start-engine --version \
-      && popd || exit
+      && popd || exit \
+      && mv /tmp/player.html /opt/acestream/data/webui/html/player.html
 
-RUN mv /tmp/player.html /opt/acestream/data/webui/html/player.html
-
-RUN virtualenv -p python3.10 /app/venv
-RUN /app/venv/bin/pip install -r /app/requirements.txt
+RUN virtualenv -p python3.10 /app/venv && /app/venv/bin/pip install -r /app/requirements.txt
 
 EXPOSE 15123
 EXPOSE 8621
