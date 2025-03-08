@@ -19,14 +19,14 @@ Para instalar LocalStreams, sigue estos pasos:
     ```
 4. Ejecuta el contenedor:
     ```
-    docker run 
-        -it --name localstreams \
-        --publish 15123:15123 \                                             #puertos de la aplicación
-        -l com.centurylinklabs.watchtower.enable=false -l wud.watch=false   #esto es util si usas watchtower o whatsupdocker \
-        --restart always \
-        -v <path/a/carpeta/con/m3u>:/data/m3u \                             #ruta de la carpeta que contiene los m3u
-        -v <path/a/carpeta/con/picon>:/data/picon \                         #ruta de la carpeta que contiene los picon
-        franlerma/localstreams
+    docker run -it --name localstreams \
+        --network host \
+        -l com.centurylinklabs.watchtower.enable=false -l wud.watch=false --restart always \
+        -v /dev/dri:/dev/dri -v /opt/docker/volumes/localstreams/m3u:/data/m3u  \
+        -v /opt/docker/volumes/localstreams/picon:/data/picon \
+        --tmpfs /tmp/acestream-cache:exec,rw,size=500M \
+        -e ACESTREAM_POLL_TIME=0 -e ACESTRAM_RETRY_TOTAL=10 -e ACESTREAM_ARGS="--live-cache-type memory" --platform=linux/amd64 $IMAGE_NAME \
+        --add-host=67.215.246.10:router.bittorrent.com --add-host=82.221.103.244:router.utorrent.com 
     ```
 
 ## Uso
