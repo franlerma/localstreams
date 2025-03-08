@@ -401,6 +401,7 @@ async def ace_stream(request: Request):
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 attempt += 1
                 logger.warning(f"Intento {attempt} fallido: {str(e)}")
+                time.sleep(350)
                 
                 if attempt >= ACESTREAM_RETRY_TOTAL and not manager.check_health():
                     attempt = 0
