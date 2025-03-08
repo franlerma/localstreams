@@ -22,6 +22,7 @@ def get_env(key: str, default: str, type_cast: type = str) -> str:
         logging.error(f"Valor inválido para {key}: {value}. Usando default.")
         return type_cast(default)
 
+ACESTREAM_PROXY_HOST = get_env("ACESTREAM_PROXY_HOST", "127.0.0.1", str)
 ACESTREAM_ENGINE_PORT = get_env("ACESTREAM_ENGINE_PORT", "8621", int)
 ACESTREAM_PROXY_PORT = get_env("ACESTREAM_PROXY_PORT", "33666", int)
 ACESTREAM_CACHE_DIR = get_env("ACESTREAM_CACHE_DIR", "/tmp/acestream-cache", str)
@@ -54,10 +55,14 @@ class AceStreamManager:
         self.app: Optional[FastAPI] = None
         self.http_session: Optional[ClientSession] = None
         self.acestream_process: Optional[asyncio.subprocess.Process] = None
-        # self.monitor_task: Optional[asyncio.Task] = None
-        # self.cleanup_task: Optional[asyncio.Task] = None
 
-    async def start_acestream(self):
+    async def get_acestream_process(self,):
+        if ACESTREAM_PROXY_HOST != "127.0.0.1":
+            return None
+        else :
+            self.__start_acestream()
+
+    async def __start_acestream(self):
         self.clean_cache()
         
         command = [
@@ -79,7 +84,7 @@ class AceStreamManager:
             logger.error(f"Error crítico al iniciar Acestream: {str(e)}")
             raise
 
-    async def wait_until_healthy(self, timeout: int = 30):
+    async def __wait_until_healthy(self, timeout: int = 30):
         start_time = time.monotonic()
         while time.monotonic() - start_time < timeout:
             if await self.check_health():
@@ -90,7 +95,7 @@ class AceStreamManager:
     async def check_health(self) -> bool:
         try:
             async with self.http_session.get(
-                f"http://127.0.0.1:{ACESTREAM_PROXY_PORT}/webui/api/service/version",
+                f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/webui/api/service/version",
                 timeout=ClientTimeout(total=3)
             ) as response:
                 return response.status == 200
@@ -101,24 +106,15 @@ class AceStreamManager:
     async def clean_cache(self) -> None:
         if not self.acestream_process.isempty():
             return
-        
-        # command = [
-        #     "rm",
-        #     "-rf",
-        #     ACESTREAM_CACHE_DIR
-        # ]
-
-        # try:
-        #     logger.info(f"Limpiando la caché...")
-        #     await asyncio.create_subprocess_exec(*command)
-        # except Exception as e:
-        #     logger.error(f"Error al limpiar la caché: {str(e)}")
         shutil.rmtree(ACESTREAM_CACHE_DIR, ignore_errors=True)
 
     async def restart_service(self):
-        logger.info("Iniciando reinicio del servicio...")
+        if not self.acestream_process.isempty():
+            return
+        await self.__restart_service()
 
-        # Detener proceso actual
+    async def __restart_service(self):
+        logger.info("Iniciando reinicio del servicio...")
         if self.acestream_process and self.acestream_process.returncode is None:
             try:
                 self.acestream_process.terminate()
@@ -126,7 +122,6 @@ class AceStreamManager:
             except (asyncio.TimeoutError, ProcessLookupError):
                 pass
 
-        # Limpiar recursos
         if os.path.exists(ACESTREAM_CACHE_DIR):
             shutil.rmtree(ACESTREAM_CACHE_DIR, ignore_errors=True)
             os.makedirs(ACESTREAM_CACHE_DIR, exist_ok=True)
@@ -311,18 +306,24 @@ async def ace_stream(request: Request):
     if not stream_id or len(stream_id) != 40 or not re.match(r"^[a-fA-F0-9]+$", stream_id):
         raise HTTPException(400, "ID de stream inválido")
 
-    ace_url = f"http://127.0.0.1:{ACESTREAM_PROXY_PORT}/ace/getstream?content_id={stream_id}"
+    ace_url = f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/ace/getstream?content_id={stream_id}"
 
     if request.query_params.get('quality') and request.query_params.get('quality') != 'best':
         ace_url += f"&quality={request.query_params.get('quality')[:-1]}"
 
     async def stream_content():
-        async with manager.http_session.get(ace_url) as response:
-            if response.status != 200:
-                raise HTTPException(502, "Error en el servidor upstream")
+        attempts = 0
+        while True:
+            async with manager.http_session.get(ace_url, stream=True) as response:
+                if response.status != 200 :
+                    attempts += 1
+                    if attempts < ACESTREAM_RETRY_TOTAL:
+                        logger.warning(f"Error en el servidor upstream, reintentando ({attempts}/{ACESTREAM_RETRY_TOTAL})...")
+                        continue
+                    raise HTTPException(502, "Error en el servidor upstream")
 
-            async for chunk in response.content.iter_chunked(ACESTREAM_STREAM_CHUNKSIZE):
-                yield chunk
+                async for chunk in response.content.iter_chunked(ACESTREAM_STREAM_CHUNKSIZE):
+                    yield chunk
     
     try:
         return StreamingResponse(
@@ -349,3 +350,4 @@ if __name__ == '__main__':
         timeout_keep_alive=30,
         log_config=None
     )
+    
