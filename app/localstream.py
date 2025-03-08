@@ -404,11 +404,11 @@ async def ace_stream(request: Request):
                 backoff = ACESTREAM_RETRY_BACKOFF_FACTOR ** (attempt + 1)
                 await asyncio.sleep(backoff)
                 
-                if attempt >= ACESTREAM_RETRY_TOTAL :
+                if attempt >= ACESTREAM_RETRY_TOTAL and not manager.check_health():
                     attempt = 0
                     await manager.restart_service()
                     await asyncio.sleep(backoff)
-                    
+
                 
 
     try:
