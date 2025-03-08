@@ -56,7 +56,7 @@ class AceStreamManager:
         self.http_session: Optional[ClientSession] = None
         self.acestream_process: Optional[asyncio.subprocess.Process] = None
 
-    async def get_acestream_process(self,):
+    async def start_acestream(self):
         if ACESTREAM_PROXY_HOST != "127.0.0.1":
             return None
         else :
@@ -127,7 +127,7 @@ class AceStreamManager:
             os.makedirs(ACESTREAM_CACHE_DIR, exist_ok=True)
 
         # Iniciar nuevo proceso
-        await self.start_acestream()
+        await self.__start_acestream()
 
 manager = AceStreamManager()
 
