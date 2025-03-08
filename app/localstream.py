@@ -400,18 +400,28 @@ async def ace_stream(request: Request):
                 logger.warning(f"Intento {attempt} fallido: {str(e)}")
                 await asyncio.sleep(350)
                 
-                if attempt >= ACESTREAM_RETRY_TOTAL and not manager.check_health():
-                    attempt = 0
-                    await manager.restart_service()
-                    await asyncio.sleep(3000)
-    
-                
+                # if attempt >= ACESTREAM_RETRY_TOTAL and not manager.check_health():
+                #     attempt = 0
+                #     await manager.restart_service()
+                #     await asyncio.sleep(3000)
 
+    async def stream_content():
+        async with manager.http_session.get(ace_url) as response:
+            if response.status != 200:
+                raise HTTPException(502, "Error en el servidor upstream")
+
+            for chunk in response.iter_content(chunk_size=int(ACESTREAM_STREAM_CHUNKSIZE)):
+                yield chunk
+                time.sleep(float(1000))
+    
     try:
         return StreamingResponse(
-            stream_with_retries(),
+            stream_content(),
             media_type='video/mp4',
-            headers={'X-Accel-Buffering': 'no'}
+            headers={
+                'Cache-Control': 'no-store',
+                'X-Accel-Buffering': 'no'
+            }
         )
     except Exception as e:
         logger.error(f"Error en stream Acestream: {str(e)}")
