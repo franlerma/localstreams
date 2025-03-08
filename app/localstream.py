@@ -7,6 +7,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from typing import Optional
+from typing import AsyncGenerator
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.templating import Jinja2Templates
@@ -313,28 +314,35 @@ async def ace_stream(request: Request):
 
     if request.query_params.get('quality') and request.query_params.get('quality') != 'best':
         ace_url += f"&quality={request.query_params.get('quality')[:-1]}"
+                    
+    async def stream_content(acestream_url: str) -> AsyncGenerator[bytes, None]:
+        while True: 
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(acestream_url) as response:
+                        if response.status == 200:
+                            while True:
+                                chunk = await response.content.read(8192)
+                                if not chunk:
+                                    break
+                                yield chunk
+                        else:
+                            logger.error(f"Error en la respuesta: {response.status}")
+                            await asyncio.sleep(1)
+                            continue
 
-    async def stream_content():
-        attempts = 0
-        while True:
-            async with manager.http_session.get(ace_url) as response:
-                if response.status != 200 :
-                    attempts += 1
-                    if attempts < ACESTREAM_RETRY_TOTAL:
-                        logger.warning(f"Error en el servidor upstream, reintentando ({attempts}/{ACESTREAM_RETRY_TOTAL})...")
-                        continue
-                    raise HTTPException(502, "Error en el servidor upstream")
-
-                async for chunk in response.content.iter_chunked(ACESTREAM_STREAM_CHUNKSIZE):
-                    yield chunk
+            except Exception as e:
+                logger.error(f"Error al conectar con acestream: {str(e)}")
+                await asyncio.sleep(1)
+                continue
     
     try:
         return StreamingResponse(
-            stream_content(),
+            stream_content(ace_url),
             media_type='video/mp4',
             headers={
-                'Cache-Control': 'no-store',
-                'X-Accel-Buffering': 'no'
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
             }
         )
     except Exception as e:
