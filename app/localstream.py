@@ -123,7 +123,7 @@ class AceStreamManager:
         if self.acestream_process and self.acestream_process.returncode is None:
             try:
                 self.acestream_process.terminate()
-                await self.acestream_process.wait(timeout=10)
+                await self.acestream_process.wait()
             except (asyncio.TimeoutError, ProcessLookupError):
                 pass
 
