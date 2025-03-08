@@ -159,7 +159,7 @@ async def lifespan(app: FastAPI):
         raise
 
     # Tareas en segundo plano
-    manager.monitor_task = asyncio.create_task(health_monitor())
+    #manager.monitor_task = asyncio.create_task(health_monitor())
     manager.cleanup_task = asyncio.create_task(cache_cleaner())
 
     yield
