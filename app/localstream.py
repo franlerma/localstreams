@@ -297,6 +297,7 @@ async def stream_video(request: Request):
         stream_generator(),
         media_type='video/mp4',
         headers={
+            "Connection": "keep-alive",
             'Cache-Control': 'no-store',
             'X-Stream-Duration': str(datetime.now() - start_time)
         }
