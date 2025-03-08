@@ -382,28 +382,28 @@ async def ace_stream(request: Request):
     if request.query_params.get('quality') and request.query_params.get('quality') != 'best':
         ace_url += f"&quality={request.query_params.get('quality')[:-1]}"
 
-    async def stream_with_retries():
-        #for attempt in range(ACESTREAM_RETRY_TOTAL):
-        attempt = 0
-        while True :
-            try:
-                async with manager.http_session.get(ace_url) as response:
-                    if response.status != 200:
-                        raise HTTPException(502, "Error en el servidor upstream")
+    # async def stream_with_retries():
+    #     #for attempt in range(ACESTREAM_RETRY_TOTAL):
+    #     attempt = 0
+    #     while True :
+    #         try:
+    #             async with manager.http_session.get(ace_url) as response:
+    #                 if response.status != 200:
+    #                     raise HTTPException(502, "Error en el servidor upstream")
 
-                    async for chunk in response.content.iter_chunked(ACESTREAM_STREAM_CHUNKSIZE):
-                        yield chunk
-                    return
+    #                 async for chunk in response.content.iter_chunked(ACESTREAM_STREAM_CHUNKSIZE):
+    #                     yield chunk
+    #                 return
 
-            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                attempt += 1
-                logger.warning(f"Intento {attempt} fallido: {str(e)}")
-                await asyncio.sleep(350)
+    #         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+    #             attempt += 1
+    #             logger.warning(f"Intento {attempt} fallido: {str(e)}")
+    #             await asyncio.sleep(350)
                 
-                # if attempt >= ACESTREAM_RETRY_TOTAL and not manager.check_health():
-                #     attempt = 0
-                #     await manager.restart_service()
-                #     await asyncio.sleep(3000)
+    #             # if attempt >= ACESTREAM_RETRY_TOTAL and not manager.check_health():
+    #             #     attempt = 0
+    #             #     await manager.restart_service()
+    #             #     await asyncio.sleep(3000)
 
     async def stream_content():
         async with manager.http_session.get(ace_url) as response:
@@ -412,7 +412,6 @@ async def ace_stream(request: Request):
 
             async for chunk in response.content.iter_chunked(ACESTREAM_STREAM_CHUNKSIZE):
                 yield chunk
-                await asyncio.sleep(350)
     
     try:
         return StreamingResponse(
