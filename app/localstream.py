@@ -110,13 +110,14 @@ class AceStreamManager:
                 f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/webui/api/service?method=get_version&format=jsonp&callback=",
                 timeout=ClientTimeout(total=3)
             ) as response:
-                if response.status != 200:
-                    return False
+                return response.status == 200
+                # if response.status != 200:
+                #     return False
                 
-                data = await response.json()
-                logger.debug(f"Respuesta de salud: {data}")
+                # data = await response.json()
+                # logger.debug(f"Respuesta de salud: {data}")
 
-                return data.get("error") is None
+                # return data.get("error") is None
         except Exception as e:
             logger.debug(f"Error de salud: {str(e)}")
             return False
