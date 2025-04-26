@@ -107,7 +107,7 @@ class AceStreamManager:
     async def check_health(self) -> bool:
         try:
             async with self.http_session.get(
-                f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/webui/api/service?method=get_version",
+                f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/ace/status",
                 timeout=ClientTimeout(total=3)
             ) as response:
                 return response.status == 200
