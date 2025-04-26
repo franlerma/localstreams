@@ -5,7 +5,6 @@ import shutil
 import signal
 import logging
 import time
-import requests
 from contextlib import asynccontextmanager
 from typing import Optional
 from typing import AsyncGenerator
@@ -107,14 +106,11 @@ class AceStreamManager:
 
     async def check_health(self) -> bool:
         try:
-            with requests.get(
+            async with self.http_session.get(
                 f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/ace/status",
                 timeout=ClientTimeout(total=3)
             ) as response:
-                if response.status_code != 200:
-                     return False
-
-                return response.json().get("error") is None
+                return response.status == 200
         except Exception as e:
             logger.debug(f"Error de salud: {str(e)}")
             return False
@@ -334,7 +330,7 @@ async def ace_stream(request: Request):
         while True: 
             try:
                 async with aiohttp.ClientSession() as session:
-                    with session.get(acestream_url) as response:
+                    async with session.get(acestream_url) as response:
                         if response.status == 200:
                             while True:
                                 chunk = await response.content.read(8192)
