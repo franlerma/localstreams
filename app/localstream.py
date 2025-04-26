@@ -107,10 +107,16 @@ class AceStreamManager:
     async def check_health(self) -> bool:
         try:
             async with self.http_session.get(
-                f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/ace/status",
+                f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/webui/api/service?method=get_version&format=jsonp&callback=",
                 timeout=ClientTimeout(total=3)
             ) as response:
-                return response.status == 200
+                if response.status != 200:
+                    return False
+                
+                data = await response.json()
+                logger.debug(f"Respuesta de salud: {data}")
+
+                return data.get("error") is None
         except Exception as e:
             logger.debug(f"Error de salud: {str(e)}")
             return False
