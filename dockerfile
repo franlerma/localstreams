@@ -34,7 +34,7 @@ COPY resources/acestream.conf /opt/acestream/acestream.conf
 #         ffmpeg python3-virtualenv python3-venv 
 
 RUN apk update
-RUN apk add ffmpeg py3-virtualenv
+RUN apk add ffmpeg py3-virtualenv py-pip
 RUN pip install --upgrade pip
 
 RUN virtualenv -p python3.10 /app/venv && /app/venv/bin/pip install -r /app/requirements.txt
