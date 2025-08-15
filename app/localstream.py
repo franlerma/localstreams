@@ -33,9 +33,9 @@ ACESTREAM_RETRY_BACKOFF_FACTOR = get_env("ACESTREAM_RETRY_BACKOFF_FACTOR", "2.0"
 ACESTREAM_RETRY_TOTAL = get_env("ACESTREAM_RETRY_TOTAL", "10", int)
 ACESTREAM_STREAM_CHUNKSIZE = get_env("ACESTREAM_STREAM_CHUNKSIZE", "8192", int)
 
-ACESTREAM_CACHE_DIR = get_env("ACESTREAM_CACHE_DIR", "/tmp/acestream-cache", str)
+# ACESTREAM_CACHE_DIR no es necesario ya que el cache es manejado por el contenedor
 APP_PORT = get_env("ACESTREAM_APP_PORT", "15123", int)
-STREAMLINK_BINARY = get_env("ACESTREAM_STREAMLINK_BINARY", "/app/venv/bin/streamlink", str)
+STREAMLINK_BINARY = get_env("STREAMLINK_BINARY", "streamlink", str)
 
 M3U_DIR = get_env("APP_M3U_DIR", "/data/m3u", str)
 LOG_LEVEL = get_env("APP_LOG_LEVEL", "INFO", str)
@@ -47,152 +47,69 @@ logging.basicConfig(
     format='{"time": "%(asctime)s", "level": "%(levelname)s", "module": "%(name)s", "message": "%(message)s"}',
     level=LOG_LEVEL
 )
-logger = logging.getLogger("AceStreamManager")
+logger = logging.getLogger("LocalStreams")
 
 # Cache para templates M3U
 templates = Jinja2Templates(directory=M3U_DIR)
 templates.env.cache = None
 
-class AceStreamManager:
-    def __init__(self):
-        self.app: Optional[FastAPI] = None
-        self.http_session: Optional[ClientSession] = None
-        self.acestream_process: Optional[asyncio.subprocess.Process] = None
-        self.acexy_process: Optional[asyncio.subprocess.Process] = None
+# Variable global para la sesión HTTP
+http_session: Optional[ClientSession] = None
 
-    async def start_acestream(self):
-        if ACESTREAM_PROXY_HOST != "127.0.0.1":
-            self.acestream_process = Optional.empty()
-            return None
-        else :
-            await self.__start_acestream()
-
-    async def __start_acestream(self):
-        await self.clean_cache()
-        
-        # command = [
-        #     ACESTREAM_BINARY,
-        #     "--use-ffmpeg=1",
-        #     "--client-console",
-        #     "--port", f"{ACESTREAM_ENGINE_PORT}",
-        #     "--http-port", f"{ACESTREAM_PROXY_PORT}",
-        #     "--cache-dir", ACESTREAM_CACHE_DIR,
-        #     "--bind-all",
-        #     ACESTREAM_ARGS
-        # ]
-
-        command_ace_engine = [ "/bin/bash", "/run.sh", "&" ]
-        command_acexy = [ "/acexy" ]
-
-        try:
-            self.acestream_process = await asyncio.create_subprocess_exec(*command_ace_engine)
-            logger.info(f"Ace Engine iniciado con PID: {self.acestream_process.pid}")
-            
-            self.acexy_process = await asyncio.create_subprocess_exec(*command_acexy)
-            logger.info(f"Acexy iniciado con PID: {self.acestream_process.pid}")
-            
-            await self.__wait_until_healthy()
-        except Exception as e:
-            logger.error(f"Error crítico al iniciar Acestream: {str(e)}")
-            raise
-
-    async def __wait_until_healthy(self, timeout: int = 30):
-        start_time = time.monotonic()
-        while time.monotonic() - start_time < timeout:
-            if await self.check_health():
-                return
-            await asyncio.sleep(1)
-        raise TimeoutError("El servicio no se inició correctamente")
-
-    async def check_health(self) -> bool:
-        try:
-            async with self.http_session.get(
-                f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/ace/status",
-                timeout=ClientTimeout(total=3)
-            ) as response:
-                return response.status == 200
-        except Exception as e:
-            logger.debug(f"Error de salud: {str(e)}")
-            return False
-
-    async def clean_cache(self) -> None:
-        if ACESTREAM_PROXY_HOST != "127.0.0.1":
-            return
-        if self.acestream_process and not self.acestream_process.isempty():
-            return
-        shutil.rmtree(ACESTREAM_CACHE_DIR, ignore_errors=True)
-
-    async def restart_service(self):
-        if self.acestream_process and not self.acestream_process.isempty():
-            return
-        await self.__restart_service()
-
-    async def __restart_service(self):
-        logger.info("Iniciando reinicio del servicio...")
-        if self.acestream_process and self.acestream_process.returncode is None:
-            try:
-                self.acestream_process.terminate()
-                await self.acestream_process.wait()
-            except (asyncio.TimeoutError, ProcessLookupError):
-                pass
-
-        if os.path.exists(ACESTREAM_CACHE_DIR):
-            shutil.rmtree(ACESTREAM_CACHE_DIR, ignore_errors=True)
-            os.makedirs(ACESTREAM_CACHE_DIR, exist_ok=True)
-
-        # Iniciar nuevo proceso
-        await self.__start_acestream()
-
-manager = AceStreamManager()
+async def check_health() -> bool:
+    """Verifica el estado del servicio acestream externo"""
+    try:
+        async with http_session.get(
+            f"http://{ACESTREAM_PROXY_HOST}:{ACESTREAM_PROXY_PORT}/ace/status",
+            timeout=ClientTimeout(total=3)
+        ) as response:
+            return response.status == 200
+    except Exception as e:
+        logger.debug(f"Error de salud del servicio acestream: {str(e)}")
+        return False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global http_session
+    
     # Configurar manejo de señales
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(app)))
+        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
 
-    # Inicializar manejo de HTTP
-    manager.http_session = ClientSession(
+    # Inicializar sesión HTTP
+    http_session = ClientSession(
         connector=aiohttp.TCPConnector(limit=MAX_CONNECTIONS, ssl=False),
         timeout=ClientTimeout(total=30)
     )
-    manager.app = app
-    app.state.manager = manager
-
+    
+    logger.info("Aplicación iniciada - conectando a acestream externo")
+    
+    # Verificar disponibilidad del servicio acestream externo (opcional)
     try:
-        await manager.start_acestream()
+        if await check_health():
+            logger.info("Servicio acestream externo está disponible")
+        else:
+            logger.warning("Servicio acestream externo no disponible al inicio")
     except Exception as e:
-        logger.critical(f"No se pudo iniciar el servicio: {str(e)}")
-        raise
+        logger.warning(f"No se pudo verificar el servicio acestream: {str(e)}")
 
     yield
 
     # Finalización ordenada
-    await shutdown(app)
+    await shutdown()
 
-async def shutdown(app: FastAPI):
+async def shutdown():
+    global http_session
     logger.info("Iniciando apagado controlado...")
 
-    # Detener proceso Acestream
-    logger.info("Deteniendo proceso Acestream...")
-    if manager.acestream_process and manager.acestream_process.returncode is None:
-        try:
-            manager.acestream_process.terminate()
-            await manager.acestream_process.wait()
-            logger.info("Proceso Acestream terminado")
-        except ProcessLookupError:
-            pass
-
     # Cerrar sesión HTTP
-    logger.info("Cerrando sesión HTTP...")
-    if manager.http_session and not manager.http_session.closed:
-        await manager.http_session.close()
+    if http_session and not http_session.closed:
+        await http_session.close()
         logger.info("Sesión HTTP cerrada")
 
     logger.info("Apagado completado correctamente")
     os._exit(0)
-
 
 app = FastAPI(lifespan=lifespan)
 
@@ -250,7 +167,7 @@ async def generate_m3u(request: Request, m3u_file: str):
 
 @app.get("/check_health")
 async def health():
-    healthy = await manager.check_health()
+    healthy = await check_health()
     return JSONResponse({"healthy": healthy})
 
 @app.get("/picon/{piconFileName}")
@@ -262,46 +179,123 @@ async def piconFile(piconFileName: str):
 async def stream_video(request: Request):
     """Streaming mejorado con gestión de buffers y tiempo de espera"""
     from datetime import datetime
+    import shutil
 
     url = request.query_params.get('url')
     if not url or not url.startswith(('http://', 'https://')):
         raise HTTPException(400, "URL inválida")
 
-    start_time = datetime.now()
-    logger.info(f"Iniciando stream para {url}")
-    
-    quality = request.query_params.get('quality')[:-1] if request.query_params.get('quality') else 'best'
+    # Verificar que streamlink esté disponible
+    streamlink_path = shutil.which(STREAMLINK_BINARY)
+    if not streamlink_path:
+        logger.error(f"Streamlink no encontrado en PATH: {STREAMLINK_BINARY}")
+        raise HTTPException(500, "Streamlink no está disponible")
 
-    proc = await asyncio.create_subprocess_exec(
-        STREAMLINK_BINARY, url, quality, '--stdout',
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
+    start_time = datetime.now()
+    logger.info(f"Iniciando stream para {url} usando {streamlink_path}")
+    
+    quality = request.query_params.get('quality')
+    if quality and quality.endswith('p'):
+        quality = quality[:-1]
+    else:
+        quality = 'best'
+
+    # Comando con parámetros adicionales para mejor compatibilidad
+    cmd = [
+        streamlink_path,
+        url,
+        quality,
+        '--stdout',
+        '--retry-streams', '3',
+        '--retry-max', '5',
+        '--http-timeout', '60'
+    ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        logger.info(f"Proceso streamlink iniciado con PID: {proc.pid}")
+        
+    except Exception as e:
+        logger.error(f"Error al iniciar streamlink: {str(e)}")
+        raise HTTPException(500, f"Error al iniciar streamlink: {str(e)}")
 
     async def stream_generator():
+        error_output = ""
+        chunks_sent = 0  # Inicializar aquí para evitar UnboundLocalError
+        
         try:
+            # Leer stderr en paralelo para capturar errores
+            async def read_stderr():
+                nonlocal error_output
+                try:
+                    stderr_data = await proc.stderr.read()
+                    if stderr_data:
+                        error_output = stderr_data.decode('utf-8', errors='ignore')
+                        logger.warning(f"Streamlink stderr: {error_output}")
+                except Exception as e:
+                    logger.error(f"Error leyendo stderr: {str(e)}")
+
+            # Iniciar lectura de stderr en background
+            stderr_task = asyncio.create_task(read_stderr())
+            
+            # Esperar un poco para que streamlink se inicialice
+            await asyncio.sleep(2)
+            
+            # Verificar si el proceso sigue vivo
+            if proc.returncode is not None:
+                await stderr_task
+                logger.error(f"Streamlink terminó prematuramente con código: {proc.returncode}")
+                logger.error(f"Error output: {error_output}")
+                raise HTTPException(500, f"Streamlink falló: {error_output}")
+
             while not proc.stdout.at_eof():
                 try:
                     chunk = await asyncio.wait_for(
                         proc.stdout.read(ACESTREAM_STREAM_CHUNKSIZE),
-                        timeout=10.0
+                        timeout=30.0
                     )
                     if chunk:
+                        chunks_sent += 1
+                        if chunks_sent % 100 == 0:  # Log cada 100 chunks
+                            logger.debug(f"Enviados {chunks_sent} chunks")
                         yield chunk
                     else:
-                        logger.warning("Chunk vacío recibido")
+                        logger.info("Stream terminado - chunk vacío recibido")
                         break
                 except asyncio.TimeoutError:
                     logger.error("Timeout leyendo del stream")
                     break
+                except Exception as e:
+                    logger.error(f"Error leyendo chunk: {str(e)}")
+                    break
+                    
+        except Exception as e:
+            logger.error(f"Error en stream generator: {str(e)}")
+            raise
         finally:
+            # Cleanup del proceso
             if proc.returncode is None:
                 try:
+                    logger.info("Terminando proceso streamlink...")
                     proc.terminate()
-                    await proc.wait()
+                    try:
+                        await asyncio.wait_for(proc.wait(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        logger.warning("Forzando terminación de streamlink...")
+                        proc.kill()
+                        await proc.wait()
                 except ProcessLookupError:
                     pass
-            logger.info(f"Stream finalizado - Duración: {datetime.now() - start_time}")
+                except Exception as e:
+                    logger.error(f"Error terminando proceso: {str(e)}")
+            
+            duration = datetime.now() - start_time
+            logger.info(f"Stream finalizado - Duración: {duration}, Chunks enviados: {chunks_sent}")
 
     return StreamingResponse(
         stream_generator(),
@@ -309,7 +303,7 @@ async def stream_video(request: Request):
         headers={
             "Connection": "keep-alive",
             'Cache-Control': 'no-store',
-            'X-Stream-Duration': str(datetime.now() - start_time)
+            'Accept-Ranges': 'none'
         }
     )
 
@@ -372,4 +366,3 @@ if __name__ == '__main__':
         timeout_keep_alive=30,
         log_config=None
     )
-    

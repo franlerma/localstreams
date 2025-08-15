@@ -6,13 +6,13 @@ services:
     container_name: localstreams
     ports:
       - "15123:15123"
-      - "8621:8621"
     volumes:
       - /dev/dri:/dev/dri
       - /opt/docker/volumes/localstreams/m3u:/data/m3u
       - /opt/docker/volumes/localstreams/picon:/data/picon
       - /opt/docker/volumes/localstreams/tmp:/tmp/acestream-cache
     environment:
+      - ACESTREAM_PROXY_HOST=acexy
       - ACESTREAM_POLL_TIME=0
       - ACESTRAM_RETRY_TOTAL=10
       - ACESTREAM_ARGS=--live-cache-type memory
@@ -25,3 +25,29 @@ services:
     dns:
       - 1.1.1.1
       - 1.0.0.1
+    depends_on:
+      - acexy
+  acexy:
+    image: ghcr.io/javinator9889/acexy:0.2.0
+    ports:
+      - 8080:8080/tcp
+    environment:
+      ACEXY_LISTEN_ADDR: ":8080"  # Listen on port 8080
+      ACEXY_SCHEME: "http"        # Use HTTP
+      ACEXY_HOST: "acestream"     # Host is "acestream" or the name of the AceStream service
+      ACEXY_PORT: "6878"          # Port is 6878
+      ACEXY_M3U8_STREAM_TIMEOUT: "60s"  # Timeout is 60 seconds when in M3U8 mode
+      ACEXY_M3U8: "false"         # Disable M3U8 mode
+      ACEXY_EMPTY_TIMEOUT: "60s"  # Timeout to close the connection if no data is received
+      ACEXY_BUFFER_SIZE: 4MB      # Buffer size is 4MB
+      ACEXY_NO_RESPONSE_TIMEOUT: "10s"  # Timeout to close the connection if no response is received
+    links:
+      - acestream
+    depends_on:
+      - acestream
+
+  acestream:
+    image: martinbjeldbak/acestream-http-proxy:latest
+    platform: linux/amd64
+    environment:
+      - EXTRA_FLAGS="--allow-user-config --bind-all --client-console --max-connections 1000 --max-peers 50 --max-upload-slots 7 --log-stdout --log-debug 355 --cache-limit 5 --use-internal-buffering true --make-default-access-token true --cache-auto true"

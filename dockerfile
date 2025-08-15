@@ -1,47 +1,67 @@
-FROM --platform=linux/amd64 ghcr.io/javinator9889/acexy:0.2.0
+# Dockerfile optimizado para localstreams
+FROM python:3.11-alpine3.18
 
 LABEL \
     com.centurylinklabs.watchtower.enable="false" \
     wud.watch="false" \
     org.opencontainers.image.authors="Fran Lerma" \
-    org.opencontainers.image.url=""
+    org.opencontainers.image.title="LocalStreams" \
+    org.opencontainers.image.description="FastAPI proxy for AceStream services" \
+    org.opencontainers.image.version="1.0.0"
 
-ENV LC_ALL="C.UTF-8" 
-ENV LANG="C.UTF-8" 
-ENV ACESTREAM_VERSION="3.2.3_ubuntu_22.04_x86_64_py3.10" 
-ENV ACESTREAM_TGZ="acestream_${ACESTREAM_VERSION}.tar.gz"
-ENV ACESTREAM_TGZ_URL="https://download.acestream.media/linux/${ACESTREAM_TGZ}"
-ENV ACEXY_LISTEN_ADDR=":8063"
+# Variables de entorno para optimización
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    LC_ALL=C.UTF-8 \
+    LANG=C.UTF-8
 
-WORKDIR /tmp
-COPY app /app
-COPY data /data
-COPY resources/acestream.conf /opt/acestream/acestream.conf
+# Crear usuario no-root para seguridad
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
 
-# RUN apt-get install --no-install-recommends -yq \
-#     ffmpeg python3-pip libpython3.10 python3-pip python3-virtualenv python3-venv ca-certificates wget sqlite3 net-tools \
-#       && rm -rf /var/lib/apt/lists/* \
-#       && mkdir /opt/acestream \
-#       && tar zxf "${ACESTREAM_TGZ}" -C /opt/acestream \
-#       && rm "${ACESTREAM_TGZ}" \
-#       && pushd /opt/acestream || exit \
-#       && python3.10 -m pip install -r requirements.txt \
-#       && /opt/acestream/start-engine --version \
-#       && popd || exit \
-#       && mv /tmp/player.html /opt/acestream/data/webui/html/player.html
+# Instalar dependencias del sistema en una sola capa
+RUN apk update && \
+    apk add --no-cache \
+        ffmpeg \
+        wget \
+        curl \
+        ca-certificates \
+        gcc \
+        musl-dev \
+        libffi-dev && \
+    rm -rf /var/cache/apk/*
 
-# RUN apt-get install --no-install-recommends -yq \
-#         ffmpeg python3-virtualenv python3-venv 
+# Crear directorios con permisos correctos
+RUN mkdir -p /app /data && \
+    chown -R appuser:appgroup /app /data
 
-RUN apk update
-RUN apk add ffmpeg py3-virtualenv py-pip
-RUN python -m pip install --upgrade pip
+# Cambiar a usuario no-root
+USER appuser
 
-RUN virtualenv -p python3 /app/venv && /app/venv/bin/pip install -r /app/requirements.txt
+# Establecer directorio de trabajo
+WORKDIR /app
 
+# Copiar requirements primero para aprovechar cache de Docker
+COPY --chown=appuser:appgroup app/requirements.txt /app/
+
+# Instalar dependencias Python en el directorio del usuario
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+# Copiar código de aplicación
+COPY --chown=appuser:appgroup app/ /app/
+COPY --chown=appuser:appgroup data/ /data/
+
+# Exponer puerto
 EXPOSE 15123
-EXPOSE 8621
 
-ENTRYPOINT /app/venv/bin/python -u /app/localstream.py
+# Actualizar PATH para incluir binarios de usuario
+ENV PATH="/home/appuser/.local/bin:$PATH"
 
-HEALTHCHECK CMD wget -q -t1 -O- 'http://127.0.0.1:15123/check_health' | grep '{"healthy":true}'
+# Health check mejorado
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD wget -q -t1 -O- 'http://127.0.0.1:15123/check_health' | grep -q '{"healthy":true}' || exit 1
+
+# Punto de entrada optimizado
+ENTRYPOINT ["python", "-u", "localstream.py"]
