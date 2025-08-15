@@ -18,8 +18,6 @@ COPY app /app
 COPY data /data
 COPY resources/acestream.conf /opt/acestream/acestream.conf
 
-SHELL ["/bin/bash", "-c" ]
-
 RUN sed -i 's/deb http:\/\/security.ubuntu.com/#/g' /etc/apt/sources.list
 RUN apt-get update
 # RUN apt-get install --no-install-recommends -yq \
