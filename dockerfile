@@ -16,7 +16,7 @@ ENV ACEXY_LISTEN_ADDR=":8063"
 WORKDIR /tmp
 COPY app /app
 COPY data /data
-COPY resources /tmp
+COPY resources/acestream.conf /opt/acestream/acestream.conf
 
 SHELL ["/bin/bash", "-c" ]
 
@@ -42,7 +42,6 @@ RUN virtualenv -p python3.10 /app/venv && /app/venv/bin/pip install -r /app/requ
 EXPOSE 15123
 EXPOSE 8621
 
-RUN mv /tmp/resources/acestream.conf /opt/acestream/acestream.conf
 ENTRYPOINT /app/venv/bin/python -u /app/localstream.py
 
 HEALTHCHECK CMD wget -q -t1 -O- 'http://127.0.0.1:15123/check_health' | grep '{"healthy":true}'
