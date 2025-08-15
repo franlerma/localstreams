@@ -27,6 +27,7 @@ services:
       - acexy
   acexy:
     image: ghcr.io/javinator9889/acexy:0.2.0
+    restart: always
     ports:
       - 8080:8080/tcp
     environment:
@@ -47,5 +48,6 @@ services:
   acestream:
     image: martinbjeldbak/acestream-http-proxy:latest
     platform: linux/amd64
+    restart: always
     environment:
       - EXTRA_FLAGS="--allow-user-config --bind-all --client-console --max-connections 1000 --max-peers 50 --max-upload-slots 7 --log-stdout --log-debug 355 --cache-limit 5 --use-internal-buffering true --make-default-access-token true --cache-auto true"
