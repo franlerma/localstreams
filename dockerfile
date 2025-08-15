@@ -1,5 +1,4 @@
-# Dockerfile optimizado para localstreams
-FROM python:3.11-alpine3.18
+FROM python:3.11-alpine
 
 LABEL \
     com.centurylinklabs.watchtower.enable="false" \
