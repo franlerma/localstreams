@@ -2,7 +2,7 @@
 .PHONY: help build up down restart logs status clean volumes-create volumes-clean shell clean-old-images
 
 # Variables
-COMPOSE_FILE = docker-compose.yml
+COMPOSE_FILE = docker compose.yml
 SERVICE_NAME = localstreams
 IMAGE_NAME = franlerma/localstreams
 
@@ -23,30 +23,30 @@ clean-old-images: ## Limpiar imágenes viejas de localstreams
 	@echo "Limpieza completada"
 
 # Docker Compose
-up: ## Levantar los servicios con docker-compose
-	docker-compose -f $(COMPOSE_FILE) up -d
+up: ## Levantar los servicios con docker compose
+	docker compose -f $(COMPOSE_FILE) up -d
 
 down: ## Detener y eliminar los servicios
-	docker-compose -f $(COMPOSE_FILE) down
+	docker compose -f $(COMPOSE_FILE) down
 
 restart: down up ## Reiniciar los servicios (down + up)
 
 # Logs y monitoreo
 logs: ## Ver logs del servicio
-	docker-compose -f $(COMPOSE_FILE) logs -f $(SERVICE_NAME)
+	docker compose -f $(COMPOSE_FILE) logs -f $(SERVICE_NAME)
 
 logs-tail: ## Ver últimas 100 líneas de logs
-	docker-compose -f $(COMPOSE_FILE) logs --tail=100 $(SERVICE_NAME)
+	docker compose -f $(COMPOSE_FILE) logs --tail=100 $(SERVICE_NAME)
 
 status: ## Ver estado del servicio
-	docker-compose -f $(COMPOSE_FILE) ps
+	docker compose -f $(COMPOSE_FILE) ps
 
 # Acceso al contenedor
 shell: ## Acceder al shell del contenedor
-	docker-compose -f $(COMPOSE_FILE) exec $(SERVICE_NAME) /bin/bash
+	docker compose -f $(COMPOSE_FILE) exec $(SERVICE_NAME) /bin/bash
 
 shell-root: ## Acceder al shell como root
-	docker-compose -f $(COMPOSE_FILE) exec --user root $(SERVICE_NAME) /bin/bash
+	docker compose -f $(COMPOSE_FILE) exec --user root $(SERVICE_NAME) /bin/bash
 
 # Gestión de volúmenes
 volumes-create: ## Crear directorios de volúmenes
@@ -94,9 +94,9 @@ backup-config: ## Backup de configuraciones
 info: ## Mostrar información del sistema
 	@echo "=== Información del sistema ==="
 	@echo "Docker version: $(shell docker --version)"
-	@echo "Docker Compose version: $(shell docker-compose --version)"
+	@echo "Docker Compose version: $(shell docker compose --version)"
 	@echo "Imagen: $(IMAGE_NAME)"
 	@echo "Estado del servicio:"
-	@docker-compose -f $(COMPOSE_FILE) ps 2>/dev/null || echo "Servicios no iniciados"
+	@docker compose -f $(COMPOSE_FILE) ps 2>/dev/null || echo "Servicios no iniciados"
 	@echo "Volúmenes:"
 	@ls -la /opt/docker/volumes/localstreams/ 2>/dev/null || echo "Volúmenes no creados"
