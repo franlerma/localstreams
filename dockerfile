@@ -42,7 +42,7 @@ RUN virtualenv -p python3.10 /app/venv && /app/venv/bin/pip install -r /app/requ
 EXPOSE 15123
 EXPOSE 8621
 
-RUN mv /tmp/acestream.conf /opt/acestream/acestream.conf
+RUN mv /tmp/resources/acestream.conf /opt/acestream/acestream.conf
 ENTRYPOINT /app/venv/bin/python -u /app/localstream.py
 
 HEALTHCHECK CMD wget -q -t1 -O- 'http://127.0.0.1:15123/check_health' | grep '{"healthy":true}'
