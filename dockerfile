@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 ghcr.io/javinator9889/acexy:0.1.2
+FROM --platform=linux/amd64 ghcr.io/javinator9889/acexy:0.2.0
 
 LABEL \
     com.centurylinklabs.watchtower.enable="false" \
