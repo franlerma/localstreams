@@ -2,7 +2,7 @@
 .PHONY: help build up down restart logs status clean volumes-create volumes-clean shell clean-old-images
 
 # Variables
-COMPOSE_FILE = docker compose.yml
+COMPOSE_FILE = docker-compose.yml
 SERVICE_NAME = localstreams
 IMAGE_NAME = franlerma/localstreams
 
