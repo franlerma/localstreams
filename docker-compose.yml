@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  localstreams:
+    image: franlerma/localstreams
+    container_name: localstreams
+    ports:
+      - "15123:15123"
+      - "8621:8621"
+    volumes:
+      - /dev/dri:/dev/dri
+      - /opt/docker/volumes/localstreams/m3u:/data/m3u
+      - /opt/docker/volumes/localstreams/picon:/data/picon
+      - /opt/docker/volumes/localstreams/tmp:/tmp/acestream-cache
+    environment:
+      - ACESTREAM_POLL_TIME=0
+      - ACESTRAM_RETRY_TOTAL=10
+      - ACESTREAM_ARGS=--live-cache-type memory
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+      - wud.watch=false
+    restart: always
+    stdin_open: true
+    tty: true
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
