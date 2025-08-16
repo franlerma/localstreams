@@ -44,6 +44,8 @@ WORKDIR /app
 
 # Copiar requirements primero para aprovechar cache de Docker
 COPY --chown=appuser:appgroup app/requirements.txt /app/
+# Extra plugins
+COPY --chown=appuser:appgroup resources/plugins /home/appuser/.local/share/streamlink/plugins
 
 # Instalar dependencias Python en el directorio del usuario
 RUN pip install --user --no-cache-dir -r requirements.txt
