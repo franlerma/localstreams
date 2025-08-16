@@ -49,5 +49,7 @@ services:
     image: martinbjeldbak/acestream-http-proxy:latest
     platform: linux/amd64
     restart: always
+    ports:
+      - "8621:8621"
     environment:
       - EXTRA_FLAGS="--allow-user-config --bind-all --client-console --max-connections 1000 --max-peers 50 --max-upload-slots 7 --cache-limit 2 --use-internal-buffering true --make-default-access-token true --cache-auto true"
