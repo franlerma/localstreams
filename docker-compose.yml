@@ -59,7 +59,7 @@ services:
     environment:
       - WARP_SLEEP=2
       # - WARP_LICENSE_KEY= # optional
-      - WARP_ENABLE_NAT=1 # enable nat
+      # - WARP_ENABLE_NAT=1 # enable nat
     cap_add:
       # Docker already have them, these are for podman users
       - MKNOD
@@ -70,9 +70,9 @@ services:
       - net.ipv6.conf.all.disable_ipv6=0
       - net.ipv4.conf.all.src_valid_mark=1
       # uncomment for nat
-      - net.ipv4.ip_forward=1
-      - net.ipv6.conf.all.forwarding=1
-      - net.ipv6.conf.all.accept_ra=2
+      # - net.ipv4.ip_forward=1
+      # - net.ipv6.conf.all.forwarding=1
+      # - net.ipv6.conf.all.accept_ra=2
     volumes:
       - /tmp/data:/var/lib/cloudflare-warp
 
