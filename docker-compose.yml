@@ -25,7 +25,9 @@ services:
       - 1.0.0.1
     depends_on:
       - acexy
+
   acexy:
+    container_name: acexy
     image: ghcr.io/javinator9889/acexy:0.2.0
     restart: always
     ports:
@@ -75,6 +77,7 @@ services:
       - /tmp/data:/var/lib/cloudflare-warp
 
   acestream:
+    container_name: acestream
     image: martinbjeldbak/acestream-http-proxy:latest
     platform: linux/amd64
     restart: always
