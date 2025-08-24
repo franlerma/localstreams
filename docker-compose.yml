@@ -40,12 +40,13 @@ services:
       ACEXY_M3U8_STREAM_TIMEOUT: "60s"  # Timeout is 60 seconds when in M3U8 mode
       ACEXY_M3U8: "false"         # Disable M3U8 mode
       ACEXY_EMPTY_TIMEOUT: "60s"  # Timeout to close the connection if no data is received
-      ACEXY_BUFFER_SIZE: 4MB      # Buffer size is 4MB
+      ACEXY_BUFFER_SIZE: 64MB      # Buffer size is 4MB
       ACEXY_NO_RESPONSE_TIMEOUT: "10s"  # Timeout to close the connection if no response is received
     links:
       - acestream
     depends_on:
       - acestream
+      - warp
 
   warp:
     image: caomingjun/warp:latest
