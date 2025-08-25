@@ -25,6 +25,8 @@ services:
       - 1.0.0.1
     depends_on:
       - acexy
+    networks:
+      - media-network
 
   acexy:
     container_name: acexy
@@ -35,17 +37,19 @@ services:
     environment:
       ACEXY_LISTEN_ADDR: ":8080"  # Listen on port 8080
       ACEXY_SCHEME: "http"        # Use HTTP
-      ACEXY_HOST: "acestream"     # Host is "acestream" or the name of the AceStream service
+      ACEXY_HOST: "warp"          # Host is "warp" since acestream shares network with warp
       ACEXY_PORT: "6878"          # Port is 6878
       ACEXY_M3U8_STREAM_TIMEOUT: "60s"  # Timeout is 60 seconds when in M3U8 mode
       ACEXY_M3U8: "false"         # Disable M3U8 mode
       ACEXY_EMPTY_TIMEOUT: "60s"  # Timeout to close the connection if no data is received
-      ACEXY_BUFFER_SIZE: 1MB      # Buffer size is 4MB
+      ACEXY_BUFFER_SIZE: "4MB"    # Buffer size is 4MB
       ACEXY_NO_RESPONSE_TIMEOUT: "10s"  # Timeout to close the connection if no response is received
     links:
-      - acestream
+      - warp  # Conectar a warp ya que acestream comparte su red
     depends_on:
-      - acestream
+      - warp  # Cambiar dependencia a warp
+    networks:
+      - media-network
 
   warp:
     image: caomingjun/warp:latest
@@ -58,6 +62,9 @@ services:
       - 'c 10:200 rwm'
     ports:
       - "1080:1080"
+      - "6878:6878"  # Puerto HTTP de acestream
+      - "8621:8621"  # Puerto P2P principal de acestream
+      - "6881-6889:6881-6889"  # Rango de puertos para conexiones BitTorrent/P2P
     environment:
       - WARP_SLEEP=2
       # - WARP_LICENSE_KEY= # optional
@@ -70,16 +77,21 @@ services:
       - net.ipv4.conf.all.src_valid_mark=1
     volumes:
       - /tmp/data:/var/lib/cloudflare-warp
+    networks:
+      - media-network
 
   acestream:
     container_name: acestream
     image: martinbjeldbak/acestream-http-proxy:latest
     platform: linux/amd64
     restart: always
-    ports:
-      - "8621:8621"
     depends_on:
       - warp
     environment:
       - EXTRA_FLAGS="--allow-user-config --bind-all --client-console --max-connections 1000 --max-peers 50 --max-upload-slots 7 --cache-limit 2 --use-internal-buffering true --make-default-access-token true --cache-auto true"
-      - HTTP_PROXY=http://warp:1080 
+    network_mode: "service:warp"  # Usar la misma interfaz de red que warp
+
+# Red personalizada para comunicación entre contenedores
+networks:
+  media-network:
+    driver: bridge
