@@ -325,38 +325,69 @@ async def ace_stream(request: Request):
     start_time = datetime.now()
     logger.info(f"Iniciando stream acestream para ID: {stream_id}")
 
-    async def wait_for_acestream_ready(url: str, max_wait: int = 30) -> bool:
-        """Espera a que acestream esté listo para servir el stream"""
-        logger.info("Esperando a que acestream prepare el stream...")
+    async def wait_for_acestream_ready(url: str, max_wait: int = 20) -> bool:
+        """Espera a que acestream esté listo para servir el stream con estrategia optimizada"""
+        logger.info("Verificando disponibilidad de acestream...")
         
-        for attempt in range(max_wait):
+        # Fase 1: Verificación rápida de disponibilidad (primeros 5 segundos)
+        for attempt in range(5):
+            try:
+                async with http_session.get(url, timeout=ClientTimeout(total=2)) as response:
+                    if response.status == 200:
+                        logger.info(f"Acestream respondió OK después de {attempt + 1} segundos")
+                        # En lugar de esperar datos, verificamos headers de contenido
+                        content_type = response.headers.get('content-type', '')
+                        if 'video' in content_type or 'octet-stream' in content_type:
+                            logger.info("Acestream listo - tipo de contenido válido detectado")
+                            return True
+                        
+                        # Si no hay headers de video, intentamos leer un pequeño chunk
+                        try:
+                            chunk = await asyncio.wait_for(
+                                response.content.read(512), 
+                                timeout=1.0
+                            )
+                            if chunk:
+                                logger.info("Acestream listo - datos iniciales recibidos")
+                                return True
+                        except asyncio.TimeoutError:
+                            logger.debug("Acestream responde pero sin datos aún")
+                            
+                    elif response.status == 404:
+                        logger.debug(f"Stream no encontrado aún (intento {attempt + 1})")
+                    elif response.status == 503:
+                        logger.debug(f"Acestream ocupado (intento {attempt + 1})")
+                    else:
+                        logger.warning(f"Estado inesperado: {response.status}")
+                        
+            except asyncio.TimeoutError:
+                logger.debug(f"Timeout en verificación rápida (intento {attempt + 1})")
+            except Exception as e:
+                logger.debug(f"Error en verificación rápida {attempt + 1}: {str(e)}")
+                
+            await asyncio.sleep(0.5)  # Intervalos más cortos en fase rápida
+        
+        # Fase 2: Verificación con intervalos más largos (siguientes 15 segundos)
+        logger.info("Acestream no listo en verificación rápida, esperando inicialización...")
+        
+        for attempt in range(max_wait - 5):
             try:
                 async with http_session.get(url, timeout=ClientTimeout(total=3)) as response:
                     if response.status == 200:
-                        # Verificar que realmente hay contenido disponible
-                        try:
-                            chunk = await asyncio.wait_for(
-                                response.content.read(1024), 
-                                timeout=2.0
-                            )
-                            if chunk:
-                                logger.info(f"Acestream listo después de {attempt + 1} segundos")
-                                return True
-                        except asyncio.TimeoutError:
-                            pass
+                        logger.info(f"Acestream listo después de {attempt + 6} segundos totales")
+                        return True
                     elif response.status in [404, 503]:
-                        # Stream aún no está listo
-                        pass
+                        logger.debug(f"Acestream aún preparando stream...")
                     else:
                         logger.warning(f"Estado inesperado de acestream: {response.status}")
                         
             except Exception as e:
-                logger.debug(f"Intento {attempt + 1}: {str(e)}")
+                logger.debug(f"Verificación lenta {attempt + 1}: {str(e)}")
                 
             await asyncio.sleep(1)
         
-        logger.error(f"Acestream no estuvo listo después de {max_wait} segundos")
-        return False
+        logger.warning(f"Acestream no estuvo listo después de {max_wait} segundos, intentando conexión directa")
+        return False  # Cambio: permitir intentar conexión aunque no esté "listo"
                     
     async def stream_content(acestream_url: str) -> AsyncGenerator[bytes, None]:
         max_retries = 3
@@ -364,9 +395,10 @@ async def ace_stream(request: Request):
         chunks_sent = 0
         last_chunk_time = datetime.now()
         
-        # Esperar a que acestream esté listo
-        if not await wait_for_acestream_ready(acestream_url):
-            raise HTTPException(504, "Acestream no pudo preparar el stream")
+        # Verificar acestream y proceder incluso si no está completamente listo
+        is_ready = await wait_for_acestream_ready(acestream_url)
+        if not is_ready:
+            logger.info("Intentando conexión directa aunque acestream no parezca completamente listo")
         
         while retry_count < max_retries:
             try:
