@@ -25,6 +25,7 @@ services:
       - 1.0.0.1
     depends_on:
       - acexy
+      - warp
     networks:
       - media-network
 
