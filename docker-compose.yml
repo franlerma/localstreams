@@ -88,8 +88,8 @@ services:
     restart: always
     depends_on:
       - warp
-    environment:
-      - EXTRA_FLAGS="--allow-user-config --bind-all --client-console --max-connections 1000 --max-peers 50 --max-upload-slots 7 --cache-limit 2 --use-internal-buffering true --make-default-access-token true --cache-auto true"
+    # environment:
+    #   - EXTRA_FLAGS="--allow-user-config --bind-all --client-console --max-peers 50 --max-upload-slots 7 --cache-limit 2 --use-internal-buffering false --make-default-access-token true --cache-auto true"
     network_mode: "service:warp"  # Usar la misma interfaz de red que warp
 
 # Red personalizada para comunicación entre contenedores
