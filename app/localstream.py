@@ -309,6 +309,8 @@ async def stream_video(request: Request):
 
 @app.get("/acestream/video")
 async def ace_stream(request: Request):
+    from datetime import datetime
+    
     stream_id = request.query_params.get('id')
 
     # Validación mejorada del ID
@@ -319,27 +321,121 @@ async def ace_stream(request: Request):
 
     if request.query_params.get('quality') and request.query_params.get('quality') != 'best':
         ace_url += f"&quality={request.query_params.get('quality')[:-1]}"
+
+    start_time = datetime.now()
+    logger.info(f"Iniciando stream acestream para ID: {stream_id}")
+
+    async def wait_for_acestream_ready(url: str, max_wait: int = 30) -> bool:
+        """Espera a que acestream esté listo para servir el stream"""
+        logger.info("Esperando a que acestream prepare el stream...")
+        
+        for attempt in range(max_wait):
+            try:
+                async with http_session.get(url, timeout=ClientTimeout(total=3)) as response:
+                    if response.status == 200:
+                        # Verificar que realmente hay contenido disponible
+                        try:
+                            chunk = await asyncio.wait_for(
+                                response.content.read(1024), 
+                                timeout=2.0
+                            )
+                            if chunk:
+                                logger.info(f"Acestream listo después de {attempt + 1} segundos")
+                                return True
+                        except asyncio.TimeoutError:
+                            pass
+                    elif response.status in [404, 503]:
+                        # Stream aún no está listo
+                        pass
+                    else:
+                        logger.warning(f"Estado inesperado de acestream: {response.status}")
+                        
+            except Exception as e:
+                logger.debug(f"Intento {attempt + 1}: {str(e)}")
+                
+            await asyncio.sleep(1)
+        
+        logger.error(f"Acestream no estuvo listo después de {max_wait} segundos")
+        return False
                     
     async def stream_content(acestream_url: str) -> AsyncGenerator[bytes, None]:
-        while True: 
+        max_retries = 3
+        retry_count = 0
+        chunks_sent = 0
+        last_chunk_time = datetime.now()
+        
+        # Esperar a que acestream esté listo
+        if not await wait_for_acestream_ready(acestream_url):
+            raise HTTPException(504, "Acestream no pudo preparar el stream")
+        
+        while retry_count < max_retries:
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(acestream_url) as response:
-                        if response.status == 200:
-                            while True:
-                                chunk = await response.content.read(8192)
-                                if not chunk:
-                                    break
-                                yield chunk
-                        else:
-                            logger.error(f"Error en la respuesta: {response.status}")
-                            await asyncio.sleep(1)
+                logger.info(f"Conectando a acestream (intento {retry_count + 1}/{max_retries})")
+                
+                async with http_session.get(
+                    acestream_url,
+                    timeout=ClientTimeout(total=60, connect=10)
+                ) as response:
+                    if response.status != 200:
+                        logger.error(f"Error HTTP {response.status} desde acestream")
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            await asyncio.sleep(min(retry_count * 2, 10))
+                        continue
+                    
+                    logger.info("Conexión establecida con acestream, iniciando transmisión")
+                    retry_count = 0  # Reset en conexión exitosa
+                    
+                    while True:
+                        try:
+                            chunk = await asyncio.wait_for(
+                                response.content.read(ACESTREAM_STREAM_CHUNKSIZE),
+                                timeout=30.0
+                            )
+                            
+                            if not chunk:
+                                logger.info("Stream terminado - no más datos disponibles")
+                                return
+                                
+                            chunks_sent += 1
+                            last_chunk_time = datetime.now()
+                            
+                            # Log periódico del progreso
+                            if chunks_sent % 200 == 0:
+                                duration = datetime.now() - start_time
+                                logger.info(f"Stream activo - {chunks_sent} chunks enviados, duración: {duration}")
+                            
+                            yield chunk
+                            
+                        except asyncio.TimeoutError:
+                            time_since_last = datetime.now() - last_chunk_time
+                            logger.warning(f"Timeout leyendo chunk - {time_since_last.seconds}s sin datos")
+                            
+                            # Si han pasado más de 60 segundos sin datos, reintentar
+                            if time_since_last.seconds > 60:
+                                logger.error("Stream parece estar muerto, reintentando conexión")
+                                break
                             continue
+                            
+                        except Exception as e:
+                            logger.error(f"Error leyendo chunk del stream: {str(e)}")
+                            break
 
+            except asyncio.CancelledError:
+                logger.info("Stream cancelado por el cliente")
+                return
             except Exception as e:
-                logger.error(f"Error al conectar con acestream: {str(e)}")
-                await asyncio.sleep(1)
-                continue
+                logger.error(f"Error de conexión con acestream: {str(e)}")
+                retry_count += 1
+                if retry_count < max_retries:
+                    wait_time = min(retry_count * 2, 10)
+                    logger.info(f"Reintentando en {wait_time} segundos...")
+                    await asyncio.sleep(wait_time)
+        
+        # Si llegamos aquí, se agotaron los reintentos
+        duration = datetime.now() - start_time
+        logger.error(f"Stream falló después de {max_retries} intentos - Duración: {duration}, Chunks enviados: {chunks_sent}")
+        raise HTTPException(504, "No se pudo establecer conexión estable con acestream")
     
     try:
         return StreamingResponse(
@@ -348,6 +444,7 @@ async def ace_stream(request: Request):
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
+                "Accept-Ranges": "none"
             }
         )
     except Exception as e:
