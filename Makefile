@@ -6,6 +6,7 @@ MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 COMPOSE_FILE = $(MAKEFILE_DIR)docker-compose.yml
 SERVICE_NAME = localstreams
 IMAGE_NAME = franlerma/localstreams
+PROFILE = regular
 
 # Ayuda por defecto
 help: ## Mostrar esta ayuda
@@ -25,10 +26,10 @@ clean-old-images: ## Limpiar imágenes viejas de localstreams
 
 # Docker Compose
 up: ## Levantar los servicios con docker compose
-	docker compose -f $(COMPOSE_FILE) up -d
+	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} up -d
 
 down: ## Detener y eliminar los servicios
-	docker compose -f $(COMPOSE_FILE) down
+	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} down
 
 restart: down up ## Reiniciar los servicios (down + up)
 
