@@ -31,7 +31,7 @@ ACESTREAM_CACHE_LIMIT = get_env("ACESTREAM_CACHE_LIMIT", "1", str)
 ACESTREAM_ARGS = get_env("ACESTREAM_ARGS", "", str)
 ACESTREAM_RETRY_BACKOFF_FACTOR = get_env("ACESTREAM_RETRY_BACKOFF_FACTOR", "2.0", float)
 ACESTREAM_RETRY_TOTAL = get_env("ACESTREAM_RETRY_TOTAL", "10", int)
-ACESTREAM_STREAM_CHUNKSIZE = get_env("ACESTREAM_STREAM_CHUNKSIZE", "8192", int)
+STREAMLINK_CHUNKSIZE = get_env("STREAMLINK_CHUNKSIZE", "131072", int)
 
 # ACESTREAM_CACHE_DIR no es necesario ya que el cache es manejado por el contenedor
 APP_PORT = get_env("ACESTREAM_APP_PORT", "15123", int)
@@ -256,7 +256,7 @@ async def stream_video(request: Request):
             while not proc.stdout.at_eof():
                 try:
                     chunk = await asyncio.wait_for(
-                        proc.stdout.read(ACESTREAM_STREAM_CHUNKSIZE),
+                        proc.stdout.read(STREAMLINK_CHUNKSIZE),
                         timeout=30.0
                     )
                     if chunk:
@@ -269,6 +269,7 @@ async def stream_video(request: Request):
                         break
                 except asyncio.TimeoutError:
                     logger.error("Timeout leyendo del stream")
+                    await asyncio.sleep(2)
                     break
                 except Exception as e:
                     logger.error(f"Error leyendo chunk: {str(e)}")
@@ -311,7 +312,7 @@ async def stream_video(request: Request):
 async def ace_stream(request: Request):
     stream_id = request.query_params.get('id')
 
-    # Validación mejorada del ID
+    # Validación del ID
     if not stream_id or len(stream_id) != 40 or not re.match(r"^[a-fA-F0-9]+$", stream_id):
         raise HTTPException(400, "ID de stream inválido")
 
@@ -319,40 +320,40 @@ async def ace_stream(request: Request):
 
     if request.query_params.get('quality') and request.query_params.get('quality') != 'best':
         ace_url += f"&quality={request.query_params.get('quality')[:-1]}"
-                    
-    async def stream_content(acestream_url: str) -> AsyncGenerator[bytes, None]:
-        while True: 
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(acestream_url) as response:
-                        if response.status == 200:
-                            while True:
-                                chunk = await response.content.read(8192)
-                                if not chunk:
-                                    break
-                                yield chunk
-                        else:
-                            logger.error(f"Error en la respuesta: {response.status}")
-                            await asyncio.sleep(1)
-                            continue
 
-            except Exception as e:
-                logger.error(f"Error al conectar con acestream: {str(e)}")
-                await asyncio.sleep(1)
-                continue
+    logger.info(f"Proxy concurrente para acestream ID: {stream_id}")
+                    
+    async def pure_proxy():
+        """Proxy completamente transparente - copia exacta del comportamiento de acestream"""
+        try:
+            # Conexión directa sin timeouts artificiales
+            async with http_session.get(
+                ace_url,
+                timeout=ClientTimeout(total=None, connect=30)
+            ) as response:
+                
+                if response.status != 200:
+                    raise HTTPException(504, f"Acestream devolvió: {response.status}")
+                
+                logger.info(f"Proxy transparente activo para {stream_id}")
+                
+                # Stream directo byte a byte sin modificaciones
+                async for chunk in response.content.iter_any():
+                    if chunk:
+                        yield chunk
+                        
+        except asyncio.CancelledError:
+            logger.info("Stream cancelado por cliente")
+            return
+        except Exception as e:
+            logger.error(f"Error en proxy transparente: {str(e)}")
+            raise HTTPException(504, "Error de conexión con acestream")
     
-    try:
-        return StreamingResponse(
-            stream_content(ace_url),
-            media_type='video/mp4',
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error en stream Acestream: {str(e)}")
-        raise HTTPException(504, "Error en la conexión del stream")
+    return StreamingResponse(
+        pure_proxy(),
+        media_type='video/mp4',
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    )
 
 if __name__ == '__main__':
     import uvicorn

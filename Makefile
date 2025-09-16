@@ -2,9 +2,11 @@
 .PHONY: help build up down restart logs status clean volumes-create volumes-clean shell clean-old-images
 
 # Variables
-COMPOSE_FILE = docker-compose.yml
+MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+COMPOSE_FILE = $(MAKEFILE_DIR)docker-compose.yml
 SERVICE_NAME = localstreams
 IMAGE_NAME = franlerma/localstreams
+PROFILE = regular
 
 # Ayuda por defecto
 help: ## Mostrar esta ayuda
@@ -14,7 +16,7 @@ help: ## Mostrar esta ayuda
 
 # Construcción de imagen
 build: clean-old-images ## Construir la imagen Docker (limpia imágenes viejas primero)
-	docker build -t $(IMAGE_NAME) .
+	cd $(MAKEFILE_DIR) && docker build -t $(IMAGE_NAME) .
 
 clean-old-images: ## Limpiar imágenes viejas de localstreams
 	@echo "Limpiando imágenes viejas de $(IMAGE_NAME)..."
@@ -24,10 +26,10 @@ clean-old-images: ## Limpiar imágenes viejas de localstreams
 
 # Docker Compose
 up: ## Levantar los servicios con docker compose
-	docker compose -f $(COMPOSE_FILE) up -d
+	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} up -d
 
 down: ## Detener y eliminar los servicios
-	docker compose -f $(COMPOSE_FILE) down
+	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} down
 
 restart: down up ## Reiniciar los servicios (down + up)
 
@@ -87,8 +89,8 @@ update: pull down up ## Actualizar imagen y reiniciar servicios
 
 # Backup
 backup-config: ## Backup de configuraciones
-	@mkdir -p ./backups
-	sudo tar -czf ./backups/localstreams-config-$(shell date +%Y%m%d-%H%M%S).tar.gz /opt/docker/volumes/localstreams/m3u /opt/docker/volumes/localstreams/picon
+	@mkdir -p $(MAKEFILE_DIR)backups
+	sudo tar -czf $(MAKEFILE_DIR)backups/localstreams-config-$(shell date +%Y%m%d-%H%M%S).tar.gz /opt/docker/volumes/localstreams/m3u /opt/docker/volumes/localstreams/picon
 
 # Información del sistema
 info: ## Mostrar información del sistema
