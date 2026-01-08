@@ -52,9 +52,6 @@ services:
     restart: always
     stdin_open: true
     tty: true
-    dns:
-      - 1.1.1.1
-      - 1.0.0.1
     depends_on:
       - acestream
       - warp
@@ -64,20 +61,20 @@ services:
   acexy-regular:
     container_name: acexy
     profiles: [ 'regular' ]
-    image: ghcr.io/javinator9889/acexy:0.2.0
+    image: ghcr.io/krinkuto11/acexy-orchestrator:latest
     restart: always
     ports:
       - 8080:8080/tcp
     environment:
-      ACEXY_LISTEN_ADDR: ":8080"
-      ACEXY_SCHEME: "http"
-      ACEXY_HOST: "acestream-regular"
-      ACEXY_PORT: "6878"          
-      ACEXY_M3U8_STREAM_TIMEOUT: "60s"
-      ACEXY_M3U8: "false"         # Disable M3U8 mode
-      ACEXY_EMPTY_TIMEOUT: "60s"
-      ACEXY_BUFFER_SIZE: "4MB"
-      ACEXY_NO_RESPONSE_TIMEOUT: "10s"
+      ACEXY_ADDR: ":8080"               # Listen on port 8080
+      ACEXY_SCHEME: "http"              # Use HTTP
+      ACEXY_HOST: "acestream-regular"   # Host is "acestream" or the name of the AceStream service
+      ACEXY_PORT: "6878"                # Port is 6878
+      ACEXY_TIMEOUT: "60s"              # Stream timeout when in M3U8 mode
+      ACEXY_M3U8: "false"               # Disable M3U8 mode
+      ACEXY_EMPTY_TIMEOUT: "60s"        # Timeout to close the connection if no data is received
+      ACEXY_BUFFER: "4.2MiB"            # Buffer size for smooth playback (prevents frame drops)
+      ACEXY_NO_RESPONSE_TIMEOUT: "10s"  # Timeout to close the connection if no response is received
     depends_on:
       - acestream-regular
     networks:
@@ -86,19 +83,19 @@ services:
   acexy-warp:
     container_name: acexy
     profiles: [ 'warp' ]
-    image: ghcr.io/javinator9889/acexy:0.2.0
+    image: ghcr.io/krinkuto11/acexy-orchestrator:latest
     restart: always
     ports:
       - 8080:8080/tcp
-    environment:
-      ACEXY_LISTEN_ADDR: ":8080"  # Listen on port 8080
-      ACEXY_SCHEME: "http"        # Use HTTP
-      ACEXY_HOST: "warp"          # Host is "warp" since acestream shares network with warp
-      ACEXY_PORT: "6878"          # Port is 6878
-      ACEXY_M3U8_STREAM_TIMEOUT: "60s"  # Timeout is 60 seconds when in M3U8 mode
-      ACEXY_M3U8: "false"         # Disable M3U8 mode
-      ACEXY_EMPTY_TIMEOUT: "60s"  # Timeout to close the connection if no data is received
-      ACEXY_BUFFER_SIZE: "4MB"    # Buffer size is 4MB
+    environment:      
+      ACEXY_ADDR: ":8080"               # Listen on port 8080
+      ACEXY_SCHEME: "http"              # Use HTTP
+      ACEXY_HOST: "warp"                # Host is "warp" since acestream shares network with warp
+      ACEXY_PORT: "6878"                # Port is 6878
+      ACEXY_TIMEOUT: "60s"              # Stream timeout when in M3U8 mode
+      ACEXY_M3U8: "false"               # Disable M3U8 mode
+      ACEXY_EMPTY_TIMEOUT: "60s"        # Timeout to close the connection if no data is received
+      ACEXY_BUFFER: "4.2MiB"            # Buffer size for smooth playback (prevents frame drops)
       ACEXY_NO_RESPONSE_TIMEOUT: "10s"  # Timeout to close the connection if no response is received
     links:
       - warp  # Conectar a warp ya que acestream comparte su red
@@ -115,9 +112,9 @@ services:
     restart: always
     ports:
       - "6878:6878"
-    #environment:
-    #    - EXTRA_FLAGS="--live-cache-type memory"
-    #   - EXTRA_FLAGS="--allow-user-config --bind-all --client-console --max-peers 50 --max-upload-slots 7 --cache-limit 2 --use-internal-buffering false --make-default-access-token true --cache-auto true"
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
     networks:
       - media-network
 
@@ -129,9 +126,6 @@ services:
     restart: always
     depends_on:
       - warp
-    #environment:
-    #    - EXTRA_FLAGS="--live-cache-type memory"
-    #   - EXTRA_FLAGS="--allow-user-config --bind-all --client-console --max-peers 50 --max-upload-slots 7 --cache-limit 2 --use-internal-buffering false --make-default-access-token true --cache-auto true"
     network_mode: "service:warp"  # Usar la misma interfaz de red que warp
 
   warp:
