@@ -31,17 +31,35 @@ async def brightcove_extract(
     
     m3u8_urls = []
     all_requests = []  # Para debug
+    api_captured = False  # Flag para salir rápido cuando capturamos la API
     
     try:
         async with async_playwright() as p:
-            # Lanzar navegador headless
+            # Lanzar navegador headless con opciones optimizadas
             logger.info("Iniciando navegador headless...")
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context()
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-dev-shm-usage',
+                    '--no-sandbox'
+                ]
+            )
+            context = await browser.new_context(
+                viewport={'width': 1280, 'height': 720},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            )
             page = await context.new_page()
+            
+            # Bloquear recursos innecesarios para acelerar carga
+            await page.route("**/*", lambda route: (
+                route.abort() if route.request.resource_type in ["image", "stylesheet", "font", "media"]
+                else route.continue_()
+            ))
             
             # Capturar respuestas de la API de Brightcove
             async def handle_response(response):
+                nonlocal api_captured
                 response_url = response.url
                 
                 # Log de todas las respuestas que contengan brightcove o m3u
@@ -65,6 +83,9 @@ async def brightcove_extract(
                                 logger.info(f"🎯 URL M3U8 desde API: {src_url[:200]}...")
                                 if src_url not in m3u8_urls:
                                     m3u8_urls.append(src_url)
+                        
+                        # Marcar que ya capturamos la API
+                        api_captured = True
                                     
                     except Exception as e:
                         logger.error(f"Error parseando respuesta de API: {str(e)}")
@@ -74,50 +95,26 @@ async def brightcove_extract(
                     logger.info(f"🎯 URL M3U8 directa capturada: {response_url}")
                     if response_url not in m3u8_urls:
                         m3u8_urls.append(response_url)
+                    api_captured = True
             
             # Escuchar todas las respuestas
             page.on("response", handle_response)
             
             # Navegar a la página
             logger.info(f"Navegando a: {url}")
-            await page.goto(url, wait_until="networkidle", timeout=60000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=10000)
             
-            # Esperar a que el video player esté presente
-            logger.info("Esperando a que el player se inicialice...")
-            try:
-                await page.wait_for_selector('video, .video-js, [data-video-id]', timeout=10000)
-                logger.info("Player detectado")
-            except Exception as e:
-                logger.warning(f"No se detectó player de video: {str(e)}")
+            # Esperar solo hasta que capturemos la API o máximo 5 segundos
+            logger.info("Esperando captura de API...")
+            max_wait = 50  # 5 segundos total (50 x 100ms)
+            for i in range(max_wait):
+                if api_captured:
+                    logger.info(f"✅ API capturada en ~{i * 100}ms")
+                    break
+                await page.wait_for_timeout(100)  # Check cada 100ms
             
-            # Dar tiempo para que cargue
-            await page.wait_for_timeout(5000)
-            
-            # Intentar hacer clic en play si hay un botón
-            try:
-                # Buscar diferentes tipos de botones de play
-                play_selectors = [
-                    'button.vjs-big-play-button',
-                    'button[aria-label*="Play"]',
-                    'button[aria-label*="Reproducir"]',
-                    '.vjs-play-control',
-                    'button[title*="Play"]',
-                    'button[title*="Reproducir"]'
-                ]
-                
-                for selector in play_selectors:
-                    play_button = await page.query_selector(selector)
-                    if play_button:
-                        logger.info(f"Haciendo clic en botón de reproducción ({selector})...")
-                        await play_button.click()
-                        await page.wait_for_timeout(8000)  # Esperar más después del click
-                        break
-                else:
-                    logger.info("No se encontró botón de play, el video podría reproducirse automáticamente")
-                    await page.wait_for_timeout(5000)
-                    
-            except Exception as e:
-                logger.warning(f"Error al intentar hacer clic en play: {str(e)}")
+            if not api_captured:
+                logger.warning("No se capturó respuesta de API en 5 segundos")
             
             # Log final de todas las peticiones capturadas
             logger.info(f"Total de URLs M3U8 capturadas: {len(m3u8_urls)}")
@@ -198,11 +195,3 @@ async def brightcove_extract(
     
     return RedirectResponse(url=mux_url)
 
-
-@router.get("/apunt/live")
-async def apunt_live_alias():
-    """
-    Alias de conveniencia para À Punt Media.
-    """
-    apunt_url = "https://www.apuntmedia.es/directe/directe-tv_136_1392524.html"
-    return RedirectResponse(url=f"/brightcove/extract?url={quote(apunt_url)}")

@@ -26,5 +26,5 @@ STREAMLINK_BINARY = get_env("STREAMLINK_BINARY", "streamlink", str)
 # Configuración general de la app
 APP_PORT = get_env("ACESTREAM_APP_PORT", "15123", int)
 M3U_DIR = get_env("APP_M3U_DIR", "/data/m3u", str)
-LOG_LEVEL = get_env("APP_LOG_LEVEL", "DEBUG", str)
+LOG_LEVEL = get_env("APP_LOG_LEVEL", "INFO", str)
 MAX_CONNECTIONS = get_env("APP_MAX_CONNECTIONS", "100", int)
