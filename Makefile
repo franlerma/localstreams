@@ -25,7 +25,7 @@ clean-old-images: ## Limpiar imágenes viejas de localstreams
 	@echo "Limpieza completada"
 
 # Docker Compose
-up: ## Levantar los servicios con docker compose
+up: build ## Levantar los servicios con docker compose
 	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} up -d
 
 down: ## Detener y eliminar los servicios
@@ -68,12 +68,11 @@ volumes-clean: ## Limpiar contenido de volúmenes (¡CUIDADO!)
 	@echo "Cache temporal limpiado"
 
 # Limpieza
-clean: down ## Detener servicios y limpiar contenedores/imágenes no utilizados
-	docker system prune -f
-
-clean-all: down clean-old-images ## Limpieza completa (contenedores, imágenes, volúmenes)
-	docker system prune -a -f
-	docker volume prune -f
+clean: down ## Detener servicios y limpiar solo contenedores/imágenes de este proyecto
+	@echo "Limpiando recursos del proyecto $(SERVICE_NAME)..."
+	@docker ps -a --filter "name=$(SERVICE_NAME)" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+	@docker images $(IMAGE_NAME) --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
+	@echo "Limpieza del proyecto completada"
 
 # Desarrollo
 dev-up: volumes-create up ## Setup completo para desarrollo
