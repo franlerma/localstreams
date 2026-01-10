@@ -27,7 +27,7 @@ async def brightcove_extract(
     if not url.startswith(('http://', 'https://')):
         raise HTTPException(400, "URL inválida")
     
-    logger.info(f"Extrayendo streams de Brightcove desde: {url}")
+    logger.debug(f"Extracting Brightcove streams from: {url}")
     
     m3u8_urls = []
     all_requests = []  # Para debug
@@ -36,7 +36,7 @@ async def brightcove_extract(
     try:
         async with async_playwright() as p:
             # Lanzar navegador headless con opciones optimizadas
-            logger.info("Iniciando navegador headless...")
+            logger.debug("Starting headless browser...")
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -62,37 +62,37 @@ async def brightcove_extract(
                 nonlocal api_captured
                 response_url = response.url
                 
-                # Log de todas las respuestas que contengan brightcove o m3u
+                # Log all responses containing brightcove or m3u
                 if any(keyword in response_url.lower() for keyword in ['brightcove', 'fastly', 'cloudfront', 'm3u']):
                     logger.debug(f"📡 Response: {response_url[:200]}...")
                     all_requests.append(response_url)
                 
-                # Capturar la respuesta de la API de playback de Brightcove
+                # Capture Brightcove playback API response
                 if 'edge.api.brightcove.com/playback/v1/accounts' in response_url:
                     try:
-                        logger.info(f"🎯 Capturando respuesta de API Brightcove...")
+                        logger.debug(f"🎯 Capturing Brightcove API response...")
                         data = await response.json()
                         
-                        # Extraer sources del JSON
+                        # Extract sources from JSON
                         sources = data.get('sources', [])
-                        logger.info(f"Encontrados {len(sources)} sources en la API")
+                        logger.debug(f"Found {len(sources)} sources in API")
                         
                         for source in sources:
                             src_url = source.get('src', '')
                             if '.m3u8' in src_url:
-                                logger.info(f"🎯 URL M3U8 desde API: {src_url[:200]}...")
+                                logger.debug(f"🎯 M3U8 URL from API: {src_url[:200]}...")
                                 if src_url not in m3u8_urls:
                                     m3u8_urls.append(src_url)
                         
-                        # Marcar que ya capturamos la API
+                        # Mark API as captured
                         api_captured = True
                                     
                     except Exception as e:
-                        logger.error(f"Error parseando respuesta de API: {str(e)}")
+                        logger.error(f"Error parsing API response: {str(e)}")
                 
-                # También capturar URLs M3U8 directas de las peticiones
+                # Also capture direct M3U8 URLs from requests
                 if '.m3u8' in response_url and not any(x in response_url.lower() for x in ['metrics', 'analytics', 'tracker']):
-                    logger.info(f"🎯 URL M3U8 directa capturada: {response_url}")
+                    logger.info(f"🎯 Direct M3U8 URL captured: {response_url}")
                     if response_url not in m3u8_urls:
                         m3u8_urls.append(response_url)
                     api_captured = True
@@ -100,46 +100,46 @@ async def brightcove_extract(
             # Escuchar todas las respuestas
             page.on("response", handle_response)
             
-            # Navegar a la página
-            logger.info(f"Navegando a: {url}")
+            # Navigate to page
+            logger.debug(f"Navigating to: {url}")
             await page.goto(url, wait_until="domcontentloaded", timeout=10000)
             
-            # Esperar solo hasta que capturemos la API o máximo 5 segundos
-            logger.info("Esperando captura de API...")
-            max_wait = 50  # 5 segundos total (50 x 100ms)
+            # Wait only until we capture API or max 5 seconds
+            logger.debug("Waiting for API capture...")
+            max_wait = 50  # 5 seconds total (50 x 100ms)
             for i in range(max_wait):
                 if api_captured:
-                    logger.info(f"✅ API capturada en ~{i * 100}ms")
+                    logger.debug(f"✅ API captured in ~{i * 100}ms")
                     break
-                await page.wait_for_timeout(100)  # Check cada 100ms
+                await page.wait_for_timeout(100)  # Check every 100ms
             
             if not api_captured:
-                logger.warning("No se capturó respuesta de API en 5 segundos")
+                logger.debug("API response not captured in 5 seconds")
             
-            # Log final de todas las peticiones capturadas
-            logger.info(f"Total de URLs M3U8 capturadas: {len(m3u8_urls)}")
-            logger.info(f"Total de peticiones relacionadas con streaming: {len(all_requests)}")
+            # Final log of all captured requests
+            logger.debug(f"Total M3U8 URLs captured: {len(m3u8_urls)}")
+            logger.debug(f"Total streaming-related requests: {len(all_requests)}")
             
-            # Si no capturamos M3U8, mostrar todas las peticiones de streaming para debug
+            # If no M3U8 captured, show streaming requests for debug
             if not m3u8_urls and all_requests:
-                logger.warning("No se capturaron M3U8, pero se detectaron estas peticiones:")
-                for req_url in all_requests[:10]:  # Mostrar las primeras 10
-                    logger.warning(f"  - {req_url[:300]}")
+                logger.debug("No M3U8 captured, but these requests were detected:")
+                for req_url in all_requests[:10]:  # Show first 10
+                    logger.debug(f"  - {req_url[:300]}")
             
             # Cerrar navegador
             await browser.close()
             
     except Exception as e:
-        logger.error(f"Error usando Playwright: {str(e)}")
-        raise HTTPException(502, f"Error extrayendo streams con Playwright: {str(e)}")
+        logger.error(f"Error using Playwright: {str(e)}")
+        raise HTTPException(502, f"Error extracting streams with Playwright: {str(e)}")
     
     if not m3u8_urls:
-        logger.error("No se capturaron URLs M3U8 durante la navegación")
-        raise HTTPException(500, "No se encontraron streams M3U8 en la página")
+        logger.error("No M3U8 URLs captured during navigation")
+        raise HTTPException(500, "No M3U8 streams found on page")
     
-    logger.info(f"Se capturaron {len(m3u8_urls)} URLs M3U8")
+    logger.debug(f"Captured {len(m3u8_urls)} M3U8 URLs")
     
-    # Filtrar URLs de Brightcove
+    # Filter Brightcove URLs
     brightcove_urls = [
         url for url in m3u8_urls 
         if any(keyword in url.lower() for keyword in ['brightcove', 'cloudfront', 'fastly'])
@@ -147,21 +147,21 @@ async def brightcove_extract(
     ]
     
     if not brightcove_urls:
-        # Si no hay chunklist, usar todas las URLs de Brightcove
+        # If no chunklist, use all Brightcove URLs
         brightcove_urls = [
             url for url in m3u8_urls 
             if any(keyword in url.lower() for keyword in ['brightcove', 'cloudfront', 'fastly'])
         ]
     
     if not brightcove_urls:
-        logger.warning("No se encontraron URLs de Brightcove específicas, usando todas las M3U8")
+        logger.debug("No specific Brightcove URLs found, using all M3U8")
         brightcove_urls = m3u8_urls
     
-    logger.info(f"URLs de Brightcove filtradas: {len(brightcove_urls)}")
+    logger.debug(f"Brightcove URLs filtered: {len(brightcove_urls)}")
     for i, u in enumerate(brightcove_urls[:5], 1):
         logger.debug(f"  Stream {i}: {u}...")
     
-    # Identificar video y audio
+    # Identify video and audio
     video_url = None
     audio_url = None
     
@@ -171,27 +171,29 @@ async def brightcove_extract(
         elif video_url is None:
             video_url = u
     
-    # Si solo hay un stream, usarlo directamente
+    # If only one stream, use it directly
     if len(brightcove_urls) == 1:
-        logger.info("Solo un stream encontrado, redirigiendo directamente")
+        logger.info(f"✓ Stream: {brightcove_urls[0]}")
         return RedirectResponse(url=brightcove_urls[0])
     
-    # Si no identificamos ambos, usar los primeros dos
+    # If both not identified, use first two
     if not video_url or not audio_url:
         if len(brightcove_urls) >= 2:
             video_url = brightcove_urls[0]
             audio_url = brightcove_urls[1]
-            logger.warning("No se identificaron claramente video/audio, usando primeros dos streams")
+            logger.debug("Video/audio not clearly identified, using first two streams")
+            logger.info(f"✓ Video: {video_url}")
+            logger.info(f"✓ Audio: {audio_url}")
         else:
-            logger.info("Solo un stream disponible")
+            logger.info(f"✓ Stream: {brightcove_urls[0]}")
             return RedirectResponse(url=brightcove_urls[0])
+    else:
+        logger.info(f"✓ Video: {video_url}")
+        logger.info(f"✓ Audio: {audio_url}")
     
-    logger.info(f"✓ Video: {video_url[:100]}...")
-    logger.info(f"✓ Audio: {audio_url[:100]}...")
-    
-    # Redirigir al mux
+    # Redirect to mux
     mux_url = f"/hls/mux?video={quote(video_url)}&audio={quote(audio_url)}"
-    logger.info(f"Redirigiendo a: {mux_url[:200]}...")
+    logger.info(f"Redirecting to: {mux_url}...")
     
     return RedirectResponse(url=mux_url)
 
