@@ -4,10 +4,9 @@ import re
 import shutil
 import signal
 import logging
-import time
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
-from typing import AsyncGenerator
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.templating import Jinja2Templates
@@ -56,6 +55,34 @@ templates.env.cache = None
 # Variable global para la sesión HTTP
 http_session: Optional[ClientSession] = None
 
+def print_available_playlists():
+    """Imprime las URLs de acceso de todas las listas de reproducción disponibles"""
+    try:
+        m3u_path = Path(M3U_DIR)
+        if not m3u_path.exists():
+            logger.warning(f"Directorio M3U no encontrado: {M3U_DIR}")
+            return
+        
+        m3u_files = list(m3u_path.glob("*.m3u"))
+        
+        if not m3u_files:
+            logger.info("No se encontraron archivos .m3u en el directorio")
+            return
+        
+        logger.info("=" * 60)
+        logger.info("URLs de listas de reproducción disponibles:")
+        logger.info("=" * 60)
+        
+        for m3u_file in sorted(m3u_files):
+            playlist_name = m3u_file.stem
+            url = f"http://127.0.0.1:{APP_PORT}/m3u/{playlist_name}.m3u"
+            logger.info(f"  - {playlist_name}: {url}")
+        
+        logger.info("=" * 60)
+        
+    except Exception as e:
+        logger.error(f"Error al listar playlists: {str(e)}")
+
 async def check_health() -> bool:
     """Verifica el estado del servicio acestream externo"""
     try:
@@ -84,6 +111,9 @@ async def lifespan(app: FastAPI):
     )
     
     logger.info("Aplicación iniciada - conectando a acestream externo")
+    
+    # Imprimir URLs de playlists disponibles
+    print_available_playlists()
     
     # Verificar disponibilidad del servicio acestream externo (opcional)
     try:
