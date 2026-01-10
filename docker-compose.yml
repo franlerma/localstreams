@@ -110,8 +110,8 @@ services:
     profiles: [ 'regular' ]
     platform: linux/amd64
     restart: always
-    ports:
-      - "6878:6878"
+    # ports:
+    #   - "6890:6878"
     dns:
       - 1.1.1.1
       - 1.0.0.1
@@ -140,7 +140,7 @@ services:
       - 'c 10:200 rwm'
     ports:
       - "1080:1080"
-      - "6878:6878"  # Puerto HTTP de acestream
+      # - "6890:6878"  # Puerto HTTP de acestream
       - "8621:8621"  # Puerto P2P principal de acestream
       - "6881-6889:6881-6889"  # Rango de puertos para conexiones BitTorrent/P2P
     environment:
