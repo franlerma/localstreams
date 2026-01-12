@@ -1,5 +1,8 @@
 import re
 import logging
+import time
+import os
+from typing import Optional, Dict
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from aiohttp import ClientSession, ClientTimeout
@@ -12,21 +15,65 @@ logger = logging.getLogger("LocalStreams.brightcove")
 # Variable global para la sesión HTTP (será inyectada desde main)
 http_session: ClientSession = None
 
+# Cache en memoria: {source_url: (redirect_url, timestamp)}
+cache: Dict[str, tuple[str, float]] = {}
+BRIGHTCOVE_CACHE_TTL = int(os.getenv("BRIGHTCOVE_CACHE_TTL", "600"))  # Default: 10 minutos
+
 def set_http_session(session: ClientSession):
     global http_session
     http_session = session
 
-@router.get("/brightcove/extract")
-async def brightcove_extract(
-    url: str = Query(..., description="URL de la página web que contiene el reproductor Brightcove")
-):
+
+def get_from_cache(url: str) -> Optional[str]:
     """
-    Extrae automáticamente las URLs de los streams de Brightcove usando Playwright
-    para ejecutar JavaScript y capturar las peticiones de red.
-    """
-    if not url.startswith(('http://', 'https://')):
-        raise HTTPException(400, "URL inválida")
+    Obtiene URL de redirección desde la cache si existe y no ha expirado.
     
+    Args:
+        url: URL fuente original
+        
+    Returns:
+        URL de redirección si existe en cache y es válida, None en caso contrario
+    """
+    if url in cache:
+        redirect_url, timestamp = cache[url]
+        age = time.time() - timestamp
+        
+        if age < BRIGHTCOVE_CACHE_TTL:
+            logger.info(f"✓ Cache hit (age: {int(age)}s): {redirect_url}")
+            return redirect_url
+        else:
+            # Cache expirada, eliminarla
+            logger.debug(f"Cache expired for url {url}")
+            del cache[url]
+    
+    return None
+
+
+def save_to_cache(source_url: str, redirect_url: str):
+    """
+    Guarda URL de redirección en la cache.
+    
+    Args:
+        source_url: URL fuente original
+        redirect_url: URL de redirección a cachear
+    """
+    cache[source_url] = (redirect_url, time.time())
+    logger.debug(f"Cached redirect for: {source_url}")
+
+
+async def resolve_brightcove_url(url: str) -> str:
+    """
+    Resuelve URL de Brightcove usando Playwright para obtener la URL del stream M3U8.
+    
+    Args:
+        url: URL de la página con el reproductor Brightcove
+        
+    Returns:
+        URL del stream M3U8 o URL de mux si hay video+audio separados
+        
+    Raises:
+        HTTPException: Si no se pueden extraer las URLs
+    """
     logger.debug(f"Extracting Brightcove streams from: {url}")
     
     m3u8_urls = []
@@ -174,27 +221,47 @@ async def brightcove_extract(
     # If only one stream, use it directly
     if len(brightcove_urls) == 1:
         logger.info(f"✓ Stream: {brightcove_urls[0]}")
-        return RedirectResponse(url=brightcove_urls[0])
+        return brightcove_urls[0]
     
     # If both not identified, use first two
     if not video_url or not audio_url:
-        # if len(brightcove_urls) >= 2:
-        #     video_url = brightcove_urls[0]
-        #     audio_url = brightcove_urls[1]
-        #     logger.debug("Video/audio not clearly identified, using first two streams")
-        #     logger.info(f"✓ Video: {video_url}")
-        #     logger.info(f"✓ Audio: {audio_url}")
-        # else:
-        logger.warning("Video/audio not clearly identified, using first two streams")
+        logger.warning("Video/audio not clearly identified, using first stream")
         logger.info(f"✓ Stream: {brightcove_urls[0]}")
-        return RedirectResponse(url=brightcove_urls[0])
+        return brightcove_urls[0]
     else:
         logger.info(f"✓ Video: {video_url}")
         logger.info(f"✓ Audio: {audio_url}")
     
     # Redirect to mux
     mux_url = f"/hls/mux?video={quote(video_url)}&audio={quote(audio_url)}"
-    logger.info(f"Redirecting to: {mux_url}...")
+    logger.debug(f"Redirecting to: {mux_url}...")
     
-    return RedirectResponse(url=mux_url)
+    return mux_url
+
+
+@router.get("/brightcove/extract")
+async def brightcove_extract(
+    url: str = Query(..., description="URL de la página web que contiene el reproductor Brightcove")
+):
+    """
+    Extrae automáticamente las URLs de los streams de Brightcove usando Playwright
+    para ejecutar JavaScript y capturar las peticiones de red.
+    
+    Incluye cache en memoria de 10 minutos para evitar llamadas repetidas.
+    """
+    if not url.startswith(('http://', 'https://')):
+        raise HTTPException(400, "URL inválida")
+    
+    # Verificar cache primero
+    cached_url = get_from_cache(url)
+    if cached_url:
+        return RedirectResponse(url=cached_url)
+    
+    # Resolver URL usando Playwright
+    redirect_url = await resolve_brightcove_url(url)
+    
+    # Guardar en cache
+    save_to_cache(url, redirect_url)
+    
+    return RedirectResponse(url=redirect_url)
 
