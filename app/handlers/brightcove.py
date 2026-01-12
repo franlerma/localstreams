@@ -178,15 +178,16 @@ async def brightcove_extract(
     
     # If both not identified, use first two
     if not video_url or not audio_url:
-        if len(brightcove_urls) >= 2:
-            video_url = brightcove_urls[0]
-            audio_url = brightcove_urls[1]
-            logger.debug("Video/audio not clearly identified, using first two streams")
-            logger.info(f"✓ Video: {video_url}")
-            logger.info(f"✓ Audio: {audio_url}")
-        else:
-            logger.info(f"✓ Stream: {brightcove_urls[0]}")
-            return RedirectResponse(url=brightcove_urls[0])
+        # if len(brightcove_urls) >= 2:
+        #     video_url = brightcove_urls[0]
+        #     audio_url = brightcove_urls[1]
+        #     logger.debug("Video/audio not clearly identified, using first two streams")
+        #     logger.info(f"✓ Video: {video_url}")
+        #     logger.info(f"✓ Audio: {audio_url}")
+        # else:
+        logger.warning("Video/audio not clearly identified, using first two streams")
+        logger.info(f"✓ Stream: {brightcove_urls[0]}")
+        return RedirectResponse(url=brightcove_urls[0])
     else:
         logger.info(f"✓ Video: {video_url}")
         logger.info(f"✓ Audio: {audio_url}")
