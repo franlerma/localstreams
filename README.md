@@ -428,6 +428,11 @@ See `app/requirements.txt` for the complete list. Main dependencies:
 - streamlink
 - ffmpeg (system binary)
 
+## Credits 🙏
+
+- **AceXY Proxy**: Original project by [Javinator9889](https://github.com/Javinator9889/acexy)
+- **AceStream Orchestrator**: Fork used in this project by [krinkuto11](https://github.com/krinkuto11/acestream-orchestrator)
+
 ## License 📜
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
