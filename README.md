@@ -1,152 +1,289 @@
 # LocalStreams 📺
 
-LocalStreams es una aplicación FastAPI diseñada para facilitar la generación y streaming de playlists M3U de canales de TV. Este proyecto permite a los usuarios acceder fácilmente a una playlist personalizada con canales de televisión que emiten por internet, así como a través de AceStream y StreamLink, todo a través de una arquitectura de microservicios containerizada. 🌐
+LocalStreams is a FastAPI application designed to facilitate the generation and streaming of M3U playlists for TV channels. This project allows users to easily access a personalized playlist with television channels broadcasting over the internet, supporting multiple streaming protocols including AceStream, StreamLink, HLS, and Brightcove through a containerized microservices architecture. 🌐
 
-## Características Principales ✨
+## Main Features ✨
 
-- **FastAPI** como framework web principal para alto rendimiento
-- **Streaming en tiempo real** de contenido AceStream y StreamLink
-- **Templates M3U dinámicos** con soporte para variables Jinja2
-- **Arquitectura multi-contenedor** con Docker Compose
-- **Health checks** integrados para monitoreo
-- **Plugins de StreamLink** personalizados (ej: Mitele)
-- **Middleware de seguridad** y gestión robusta de errores
-- **Cache management** optimizado para streaming
-- **Soporte para iconos** de canales (picons)
+- **FastAPI** as main web framework for high performance
+- **Real-time streaming** of AceStream and StreamLink content
+- **Brightcove extractor** with automatic token renewal
+- **HLS multiplexing** to combine separate video and audio streams
+- **Dynamic M3U templates** with Jinja2 variable support
+- **Modular architecture** with separate handlers for each streaming protocol
+- **Multi-container architecture** with Docker Compose
+- **Integrated health checks** for monitoring
+- **Custom StreamLink plugins** (e.g., Mitele)
+- **Security middleware** and robust error handling
+- **Optimized cache management** for streaming
+- **Channel icon support** (picons)
+- **Structured JSON logging** for easier log analysis
 
-## Arquitectura 🏗️
+## Architecture 🏗️
 
-El proyecto consta de tres servicios principales:
+### Services
 
-- **localstreams**: Aplicación FastAPI principal (puerto 15123)
-- **acexy**: Proxy para AceStream (puerto 8080)
-- **acestream**: Motor AceStream HTTP (puerto interno 6878)
+The project consists of three main services:
 
-## Instalación ⚙️
+- **localstreams**: Main FastAPI application (port 15123)
+- **acexy**: AceStream proxy (port 8080)
+- **acestream**: AceStream HTTP engine (internal port 6878)
 
-### Requisitos previos
+### Project Structure
+
+```
+localstreams/
+├── app/
+│   ├── localstream.py          # Main FastAPI application
+│   ├── config.py               # Configuration and environment variables
+│   ├── handlers/               # Handlers for different endpoints
+│   │   ├── __init__.py
+│   │   ├── streamlink.py       # StreamLink streaming
+│   │   ├── acestream.py        # AceStream streaming
+│   │   ├── hls_mux.py          # HLS multiplexing (video+audio)
+│   │   └── brightcove.py       # Generic Brightcove extractor
+│   ├── utils/                  # Utilities
+│   │   ├── __init__.py
+│   │   └── logging.py          # Logging configuration
+│   └── requirements.txt        # Python dependencies
+├── data/
+│   └── m3u/                    # Example M3U templates
+├── resources/
+│   └── plugins/                # Custom StreamLink plugins
+├── docker-compose.yml          # Multi-service configuration
+├── Dockerfile                  # Application image
+└── Makefile                    # Simplified commands
+```
+
+## Installation ⚙️
+
+### Prerequisites
 
 - 🐳 Docker
 - 🐙 Docker Compose
-- 🛠️ Make (opcional, para comandos simplificados)
+- 🛠️ Make (optional, for simplified commands)
 
-### Instalación paso a paso
+### Step-by-step Installation
 
-1. **Clona el repositorio:**
+1. **Clone the repository:**
    ```bash
    git clone https://github.com/franlerma/localstreams.git
    cd localstreams
    ```
 
-2. **Crea los directorios de volúmenes:**
+2. **Create volume directories:**
    ```bash
    make volumes-create
-   # O manualmente:
+   # Or manually:
    sudo mkdir -p /opt/docker/volumes/localstreams/{m3u,picon,tmp}
    ```
 
-3. **Construye la imagen:**
+3. **Create your M3U playlists:**
+   
+   Create your playlist files in the M3U directory:
+   ```bash
+   # Example: create a basic playlist
+   sudo nano /opt/docker/volumes/localstreams/m3u/channels.m3u
+   ```
+   
+   See the [M3U Template Example](#m3u-template-example) section below for detailed instructions on creating playlists.
+
+4. **Build the image:**
    ```bash
    make build
-   # O con docker directamente:
+   # Or directly with docker:
    docker build -t franlerma/localstreams .
    ```
 
-4. **Inicia los servicios:**
+5. **Start services:**
    ```bash
    make up
-   # O con docker-compose:
+   # Or with docker-compose:
    docker compose up -d
    ```
 
-## Comandos del Makefile 🛠️
+## Makefile Commands 🛠️
 
-El proyecto incluye un Makefile para simplificar las operaciones comunes:
+The project includes a Makefile to simplify common operations:
 
 ```bash
-make help              # Mostrar ayuda
-make build             # Construir imagen Docker
-make up                # Levantar servicios
-make down              # Detener servicios
-make restart           # Reiniciar servicios
-make logs              # Ver logs en tiempo real
-make status            # Ver estado de servicios
-make shell             # Acceder al contenedor
-make volumes-create    # Crear directorios de volúmenes
-make clean             # Limpieza de Docker
-make info              # Información del sistema
+make help              # Show help
+make build             # Build Docker image
+make up                # Start services
+make down              # Stop services
+make restart           # Restart services
+make logs              # View logs in real-time
+make status            # View service status
+make shell             # Access container
+make volumes-create    # Create volume directories
+make clean             # Docker cleanup
+make info              # System information
 ```
 
-## Configuración 📋
+## Configuration 📋
 
-### Variables de entorno principales
+### Main Environment Variables
+
+All environment variables are centralized in `app/config.py`:
 
 ```bash
-# Puerto de la aplicación FastAPI
+# FastAPI application port
 ACESTREAM_APP_PORT=15123
 
-# Configuración AceStream
+# AceStream configuration
 ACESTREAM_PROXY_HOST=acexy
 ACESTREAM_PROXY_PORT=8080
 ACESTREAM_RETRY_TOTAL=10
 ACESTREAM_ARGS=--live-cache-type memory
 
-# Directorios
+# StreamLink
+STREAMLINK_BINARY=streamlink
+STREAMLINK_CHUNKSIZE=131072
+
+# Directories
 APP_M3U_DIR=/data/m3u
 APP_LOG_LEVEL=INFO
 APP_MAX_CONNECTIONS=100
-
-# StreamLink
-STREAMLINK_BINARY=streamlink
 ```
 
-### Estructura de volúmenes
+### Volume Structure
 
 ```
 /opt/docker/volumes/localstreams/
-├── m3u/          # Templates de playlists M3U
-├── picon/        # Iconos de canales
-└── tmp/          # Cache temporal de AceStream
+├── m3u/          # M3U playlist templates
+├── picon/        # Channel icons
+└── tmp/          # AceStream temporary cache
 ```
 
-## Uso 🖥️
+## API Endpoints 🔌
 
-### Acceso a la aplicación
+### 1. StreamLink (`/streamlink/video`)
 
-Una vez iniciados los servicios, la aplicación estará disponible en:
-- **Puerto principal**: http://localhost:15123
+Stream content using StreamLink.
+
+**Parameters:**
+- `url`: URL of the stream to play (required)
+- `quality`: Stream quality (optional, default: `best`)
+
+**Example:**
+```
+http://localhost:15123/streamlink/video?url=https://example.com/stream&quality=720p
+```
+
+### 2. AceStream (`/acestream/video`)
+
+Stream content using AceStream protocol.
+
+**Parameters:**
+- `id`: AceStream ID (40 hexadecimal characters, required)
+- `quality`: Stream quality (optional)
+
+**Example:**
+```
+http://localhost:15123/acestream/video?id=b897de3e62d7c6bee9ef1107d972f3d1075e03ff
+```
+
+### 3. HLS Multiplexer (`/hls/mux`)
+
+Combine separate HLS video and audio streams into a single stream using FFmpeg.
+
+**Parameters:**
+- `video`: M3U8 video stream URL (required)
+- `audio`: M3U8 audio stream URL (required)
+
+**Example:**
+```
+http://localhost:15123/hls/mux?video=https://cdn.com/video.m3u8&audio=https://cdn.com/audio.m3u8
+```
+
+**Features:**
+- Uses FFmpeg with `-c copy` (no re-encoding, low CPU usage)
+- Automatically combines video and audio streams
+- Outputs MPEG-TS format compatible with most players
+
+### 4. Brightcove Extractor (`/brightcove/extract`)
+
+Automatically extract and stream content from any website using Brightcove player.
+
+**Parameters:**
+- `url`: URL of the webpage containing the Brightcove player (required)
+
+**Features:**
+- ✅ Automatically detects video and audio streams
+- ✅ Supports multiple CDNs (Brightcove, Cloudfront, Fastly)
+- ✅ Automatically renews tokens on each request
+- ✅ Combines video and audio if separated
+- ✅ Handles different stream configurations
+- ✅ No manual URL maintenance required
+
+**Examples:**
+```
+# Website with Brightcove player
+http://localhost:15123/brightcove/extract?url=https://example.com/live
+
+# Another channel
+http://localhost:15123/brightcove/extract?url=https://channel.tv/directo
+```
+
+**TiviMate Usage:**
+```m3u
+#EXTINF:-1 tvg-name="Channel 1",Channel 1
+http://192.168.1.100:15123/brightcove/extract?url=https://channel1.tv/directo
+
+#EXTINF:-1 tvg-name="Channel 2",Channel 2
+http://192.168.1.100:15123/brightcove/extract?url=https://channel2.tv/live
+```
+
+**Benefits:**
+- **Zero maintenance**: No need to manually update URLs
+- **Universal**: Works with any site using Brightcove
+- **Automatic tokens**: Renewed on each access
+- **Low consumption**: FFmpeg uses `-c copy` (no re-encoding)
+
+### 5. Dynamic M3U (`/m3u/{filename}.m3u`)
+
+Generate dynamic M3U playlists based on Jinja2 templates.
+
+**Template Variables:**
+- `{{scheme}}` - Protocol (http/https)
+- `{{hostname}}` - Hostname
+- `{{port}}` - Port
+- `{{base_url}}` - Complete base URL
+- Any parameter passed via query string
+
+**Example:**
+```
+http://localhost:15123/m3u/playlist.m3u?custom_param=value
+```
+
+### 6. Picons (`/picon/{filename}`)
+
+Serve channel icons.
+
+**Example:**
+```
+http://localhost:15123/picon/channel_logo.png
+```
+
+### 7. Health Check (`/check_health`)
+
+Verify the status of the AceStream service.
+
+**Example:**
+```
+http://localhost:15123/check_health
+```
+
+## Usage 🖥️
+
+### Application Access
+
+Once services are started, the application will be available at:
+- **Main port**: http://localhost:15123
 - **Health check**: http://localhost:15123/check_health
 
-### Templates M3U dinámicos
+### M3U Template Example
 
-Los templates M3U soportan Jinja2 y pueden usar variables predefinidas:
-
-- `{{scheme}}` - Protocolo (http/https)
-- `{{hostname}}` - Nombre del host
-- `{{port}}` - Puerto
-- `{{base_url}}` - URL base completa
-- Cualquier parámetro pasado por query string
-
-### Endpoints de streaming
-
-#### AceStream
-```
-{{base_url}}/acestream/video?id={acestream_id}
-```
-
-#### StreamLink
-```
-{{base_url}}/streamlink/video?url={url}&quality={quality}
-```
-
-#### Picons (iconos)
-```
-{{base_url}}/picon/{filename}
-```
-
-### Ejemplo de template M3U
-
-**Archivo**: `/opt/docker/volumes/localstreams/m3u/example.m3u`
+**File**: `/opt/docker/volumes/localstreams/m3u/example.m3u`
 
 ```m3u
 #EXTM3U
@@ -158,122 +295,156 @@ Los templates M3U soportan Jinja2 y pueden usar variables predefinidas:
 #EXTINF:-1 tvg-logo="{{base_url}}/picon/telecinco.png" tvg-name="Telecinco" tvg-id="TELE5.es", Telecinco
 {{base_url}}/acestream/video?id=b897de3e62d7c6bee9ef1107d972f3d1075e03ff
 
-#EXTINF:-1 tvg-logo="{{base_url}}/picon/external.png" tvg-name="Servidor Externo" tvg-id="EXT.es", Canal Externo
+#EXTINF:-1 tvg-logo="{{base_url}}/picon/brightcove.png" tvg-name="Brightcove Channel" tvg-id="BC.es", Brightcove
+{{base_url}}/brightcove/extract?url=https://example.com/live
+
+#EXTINF:-1 tvg-logo="{{base_url}}/picon/external.png" tvg-name="External Server" tvg-id="EXT.es", External Channel
 http://{{iptvserver}}/stream.ts
 ```
 
-**Acceso con variables**:
+**Access with variables**:
 ```
 http://localhost:15123/m3u/example.m3u?iptvserver=192.168.1.100:8080
 ```
 
-### Plugins de StreamLink
+### StreamLink Plugins
 
-El proyecto soporta plugins personalizados de StreamLink ubicados en `/resources/plugins/`. Actualmente incluye:
+The project supports custom StreamLink plugins located in `/resources/plugins/`. Currently includes:
 
-- **mitele.py**: Plugin para Mediaset España (Mitele)
+- **mitele.py**: Plugin for Mediaset España (Mitele)
 
-## Desarrollo 🔧
+## Development 🔧
 
-### Estructura del proyecto
+### Local Development
 
-```
-localstreams/
-├── app/
-│   ├── localstream.py      # Aplicación FastAPI principal
-│   └── requirements.txt    # Dependencias Python
-├── data/
-│   └── m3u/               # Templates M3U de ejemplo
-├── resources/
-│   └── plugins/           # Plugins StreamLink personalizados
-├── docker-compose.yml     # Configuración multi-servicio
-├── Dockerfile            # Imagen de la aplicación
-└── Makefile              # Comandos simplificados
-```
-
-### Desarrollo local
-
-1. **Setup inicial**:
+1. **Initial setup**:
    ```bash
    make dev-up
    ```
 
-2. **Ver logs**:
+2. **View logs**:
    ```bash
    make logs
    ```
 
-3. **Acceso al contenedor**:
+3. **Container access**:
    ```bash
    make shell
    ```
 
-### Personalización
+### Adding New Handlers
 
-- **Añadir plugins**: Coloca archivos `.py` en `resources/plugins/`
-- **Modificar templates**: Edita archivos en `/opt/docker/volumes/localstreams/m3u/`
-- **Configurar variables**: Modifica `docker-compose.yml`
+The modular architecture makes it easy to add new streaming protocols:
+
+1. Create a new file in `app/handlers/new_handler.py`
+2. Define a `router = APIRouter()`
+3. Add endpoints with decorators `@router.get()`, etc.
+4. Export in `app/handlers/__init__.py`
+5. Register in `app/localstream.py` with `app.include_router()`
+
+**Example:**
+
+```python
+# app/handlers/new_handler.py
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.get("/new/endpoint")
+async def my_endpoint():
+    return {"status": "ok"}
+```
+
+```python
+# app/handlers/__init__.py
+from .new_handler import router as new_router
+__all__ = [..., 'new_router']
+```
+
+```python
+# app/localstream.py
+from handlers import ..., new_router
+app.include_router(new_router, tags=["new"])
+```
+
+### Logging
+
+The logging system is centralized in `app/utils/logging.py`. All handlers use:
+
+```python
+logger = logging.getLogger("LocalStreams.module_name")
+```
+
+Structured JSON format for easier log analysis.
+
+### Customization
+
+- **Add plugins**: Place `.py` files in `resources/plugins/`
+- **Modify templates**: Edit files in `/opt/docker/volumes/localstreams/m3u/`
+- **Configure variables**: Modify `docker-compose.yml` or `app/config.py`
 
 ## Troubleshooting 🔍
 
-### Problemas comunes
+### Common Issues
 
-1. **Error de permisos en volúmenes**:
+1. **Volume permission errors**:
    ```bash
    sudo chown -R 1001:1001 /opt/docker/volumes/localstreams/
    ```
 
-2. **Puerto ya en uso**:
+2. **Port already in use**:
    ```bash
    make down
-   # Cambiar puerto en docker-compose.yml si es necesario
+   # Change port in docker-compose.yml if necessary
    make up
    ```
 
-3. **Problemas de red**:
+3. **Network issues**:
    ```bash
    make logs
-   # Verificar conectividad entre servicios
+   # Verify connectivity between services
    ```
 
-4. **Cache de AceStream lleno**:
+4. **AceStream cache full**:
    ```bash
    make volumes-clean
    ```
 
-### Logs y monitoreo
+### Logs and Monitoring
 
 ```bash
-make logs              # Logs en tiempo real
-make logs-tail         # Últimas 100 líneas
-make status            # Estado de servicios
+make logs              # Real-time logs
+make logs-tail         # Last 100 lines
+make status            # Service status
 ```
 
-## API Endpoints 🔌
+## Dependencies 📦
 
-- `GET /m3u/{filename}.m3u` - Generar playlist M3U
-- `GET /acestream/video?id={id}` - Stream AceStream
-- `GET /streamlink/video?url={url}` - Stream StreamLink
-- `GET /picon/{filename}` - Servir iconos
-- `GET /check_health` - Health check
+See `app/requirements.txt` for the complete list. Main dependencies:
 
-## Licencia 📜
+- FastAPI
+- uvicorn
+- aiohttp
+- streamlink
+- ffmpeg (system binary)
+
+## License 📜
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Contribuir 🤝
+## Contributing 🤝
 
-Las contribuciones son bienvenidas. Por favor:
+Contributions are welcome. Please:
 
-1. Fork del proyecto
-2. Crea una rama para tu feature
-3. Commit de tus cambios
-4. Push a la rama
-5. Abre un Pull Request
+1. Fork the project
+2. Create a branch for your feature
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
 
-## Soporte 💬
+## Support 💬
 
-Si encuentras problemas o tienes preguntas:
-- Abre un [issue](https://github.com/franlerma/localstreams/issues)
-- Revisa la documentación y logs
-- Verifica la configuración de Docker y permisos
+If you encounter issues or have questions:
+- Open an [issue](https://github.com/franlerma/localstreams/issues)
+- Review the documentation and logs
+- Verify Docker configuration and permissions
