@@ -16,6 +16,7 @@ services:
       - ACESTREAM_PROXY_PORT=8080
       - ACESTREAM_POLL_TIME=0
       - ACESTRAM_RETRY_TOTAL=10
+      - APP_LOG_LEVEL=INFO
     labels:
       - com.centurylinklabs.watchtower.enable=false
       - wud.watch=false
@@ -46,6 +47,7 @@ services:
       - ACESTREAM_PROXY_PORT=8080
       - ACESTREAM_POLL_TIME=0
       - ACESTRAM_RETRY_TOTAL=10
+      - APP_LOG_LEVEL=DEBUG
     labels:
       - com.centurylinklabs.watchtower.enable=false
       - wud.watch=false
