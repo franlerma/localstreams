@@ -118,8 +118,8 @@ services:
     profiles: [ 'regular' ]
     platform: linux/amd64
     restart: always
-    volumes:
-      - /tmp/acestream-cache:/home/appuser/.ACEStream
+    # volumes:
+    #   - /tmp/acestream-cache:/home/appuser/.ACEStream
     dns:
       - 1.1.1.1
       - 1.0.0.1
@@ -132,8 +132,8 @@ services:
     profiles: [ 'warp' ]
     platform: linux/amd64
     restart: always
-    volumes:
-      - /tmp/acestream-cache:/home/appuser/.ACEStream
+    # volumes:
+    #   - /tmp/acestream-cache:/home/appuser/.ACEStream
     depends_on:
       - warp
     network_mode: "service:warp"  # Usar la misma interfaz de red que warp
