@@ -77,6 +77,7 @@ services:
       ACEXY_EMPTY_TIMEOUT: "60s"        # Timeout to close the connection if no data is received
       ACEXY_BUFFER: "4.2MiB"            # Buffer size for smooth playback (prevents frame drops)
       ACEXY_NO_RESPONSE_TIMEOUT: "10s"  # Timeout to close the connection if no response is received
+      STREAM_LOOP_DETECTION_ENABLED: "true"
     depends_on:
       - acestream-regular
     networks:
@@ -99,6 +100,7 @@ services:
       ACEXY_EMPTY_TIMEOUT: "60s"        # Timeout to close the connection if no data is received
       ACEXY_BUFFER: "4.2MiB"            # Buffer size for smooth playback (prevents frame drops)
       ACEXY_NO_RESPONSE_TIMEOUT: "10s"  # Timeout to close the connection if no response is received
+      STREAM_LOOP_DETECTION_ENABLED: "true"
     links:
       - warp  # Conectar a warp ya que acestream comparte su red
     depends_on:
