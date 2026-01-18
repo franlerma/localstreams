@@ -25,7 +25,7 @@ clean-old-images: ## Limpiar imágenes viejas de localstreams
 	@echo "Limpieza completada"
 
 # Docker Compose
-up: build ## Levantar los servicios con docker compose
+up: volumes-create build ## Levantar los servicios con docker compose
 	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} up -d
 
 down: volumes-clean ## Detener y eliminar los servicios
