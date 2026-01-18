@@ -104,7 +104,6 @@ services:
       STREAM_LOOP_DETECTION_ENABLED: "true"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /tmp/acestream:/home/appuser/.ACEStream
     links:
       - warp  # Conectar a warp ya que acestream comparte su red
     depends_on:
@@ -118,8 +117,8 @@ services:
     profiles: [ 'regular' ]
     platform: linux/amd64
     restart: always
-    # ports:
-    #   - "6890:6878"
+    volumes:
+      - /tmp/acestream:/home/appuser/.ACEStream
     dns:
       - 1.1.1.1
       - 1.0.0.1
@@ -132,6 +131,8 @@ services:
     profiles: [ 'warp' ]
     platform: linux/amd64
     restart: always
+    volumes:
+      - /tmp/acestream:/home/appuser/.ACEStream
     depends_on:
       - warp
     network_mode: "service:warp"  # Usar la misma interfaz de red que warp
