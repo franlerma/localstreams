@@ -10,9 +10,8 @@ services:
       - /dev/dri:/dev/dri
       - /opt/docker/volumes/localstreams/m3u:/data/m3u
       - /opt/docker/volumes/localstreams/picon:/data/picon
-      - /opt/docker/volumes/localstreams/tmp:/tmp/acestream-cache
     environment:
-      - ACESTREAM_PROXY_HOST=acexy-regular
+      - ACESTREAM_PROXY_HOST=acexy
       - ACESTREAM_PROXY_PORT=8080
       - ACESTREAM_POLL_TIME=0
       - ACESTRAM_RETRY_TOTAL=10
@@ -41,9 +40,8 @@ services:
       - /dev/dri:/dev/dri
       - /opt/docker/volumes/localstreams/m3u:/data/m3u
       - /opt/docker/volumes/localstreams/picon:/data/picon
-      - /opt/docker/volumes/localstreams/tmp:/tmp/acestream-cache
     environment:
-      - ACESTREAM_PROXY_HOST=acexy-warp
+      - ACESTREAM_PROXY_HOST=acexy
       - ACESTREAM_PROXY_PORT=8080
       - ACESTREAM_POLL_TIME=0
       - ACESTRAM_RETRY_TOTAL=10
@@ -70,7 +68,7 @@ services:
     environment:
       ACEXY_ADDR: ":8080"               # Listen on port 8080
       ACEXY_SCHEME: "http"              # Use HTTP
-      ACEXY_HOST: "acestream-regular"   # Host is "acestream" or the name of the AceStream service
+      ACEXY_HOST: "acestream"           # Host is "acestream" or the name of the AceStream service
       ACEXY_PORT: "6878"                # Port is 6878
       ACEXY_TIMEOUT: "60s"              # Stream timeout when in M3U8 mode
       ACEXY_M3U8: "false"               # Disable M3U8 mode
@@ -79,7 +77,8 @@ services:
       ACEXY_NO_RESPONSE_TIMEOUT: "10s"  # Timeout to close the connection if no response is received
       STREAM_LOOP_DETECTION_ENABLED: "true"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock      
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/acestream:/home/appuser/.ACEStream
     depends_on:
       - acestream-regular
     networks:
@@ -105,6 +104,7 @@ services:
       STREAM_LOOP_DETECTION_ENABLED: "true"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/acestream:/home/appuser/.ACEStream
     links:
       - warp  # Conectar a warp ya que acestream comparte su red
     depends_on:
