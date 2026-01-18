@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.templating import Jinja2Templates
 import aiohttp
 from aiohttp import ClientSession, ClientTimeout
@@ -177,7 +177,18 @@ async def generate_m3u(request: Request, m3u_file: str):
         }
         args.update(params)
 
-        return templates.TemplateResponse(f"{m3u_file}.m3u", args, media_type='text/plain')
+        # Renderizar el template
+        response = templates.TemplateResponse(f"{m3u_file}.m3u", args, media_type='text/plain')
+        
+        # Filtrar líneas que empiezan con # pero no con #EXT
+        rendered_content = response.body.decode('utf-8')
+        filtered_lines = [
+            line for line in rendered_content.split('\n')
+            if not (line.startswith('#') and not line.startswith('#EXT'))
+        ]
+        filtered_content = '\n'.join(filtered_lines)
+        
+        return Response(content=filtered_content, media_type='text/plain', headers=response.headers)
 
     except Exception as e:
         logger.error(f"Error generando M3U: {str(e)}")

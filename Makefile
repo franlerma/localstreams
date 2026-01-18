@@ -28,7 +28,7 @@ clean-old-images: ## Limpiar imágenes viejas de localstreams
 up: build ## Levantar los servicios con docker compose
 	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} up -d
 
-down: ## Detener y eliminar los servicios
+down: volumes-clean ## Detener y eliminar los servicios
 	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} down
 
 restart: down up ## Reiniciar los servicios (down + up)
@@ -55,7 +55,7 @@ volumes-create: ## Crear directorios de volúmenes
 	@echo "Creando directorios de volúmenes..."
 	sudo mkdir -p /opt/docker/volumes/localstreams/m3u
 	sudo mkdir -p /opt/docker/volumes/localstreams/picon
-	sudo mkdir -p /opt/docker/volumes/localstreams/tmp
+	sudo mkdir -p /opt/docker/volumes/localstreams/tmp/{acestream}
 	@echo "Directorios creados en /opt/docker/volumes/localstreams/"
 
 volumes-check: ## Verificar existencia de volúmenes
@@ -63,12 +63,12 @@ volumes-check: ## Verificar existencia de volúmenes
 	@ls -la /opt/docker/volumes/localstreams/ 2>/dev/null || echo "Los volúmenes no existen. Ejecuta 'make volumes-create'"
 
 volumes-clean: ## Limpiar contenido de volúmenes (¡CUIDADO!)
-	@echo "¿Estás seguro de que quieres limpiar los volúmenes? [y/N]" && read ans && [ $${ans:-N} = y ]
+# @echo "¿Estás seguro de que quieres limpiar los volúmenes? [y/N]" && read ans && [ $${ans:-N} = y ]
 	sudo rm -rf /opt/docker/volumes/localstreams/tmp/*
 	@echo "Cache temporal limpiado"
 
 # Limpieza
-clean: down ## Detener servicios y limpiar solo contenedores/imágenes de este proyecto
+clean: down volumes-clean ## Detener servicios y limpiar solo contenedores/imágenes de este proyecto
 	@echo "Limpiando recursos del proyecto $(SERVICE_NAME)..."
 	@docker ps -a --filter "name=$(SERVICE_NAME)" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
 	@docker images $(IMAGE_NAME) --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
