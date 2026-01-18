@@ -177,18 +177,18 @@ async def generate_m3u(request: Request, m3u_file: str):
         }
         args.update(params)
 
-        # Renderizar el template
-        response = templates.TemplateResponse(f"{m3u_file}.m3u", args, media_type='text/plain')
+        # Renderizar el template manualmente
+        template = templates.get_template(f"{m3u_file}.m3u")
+        rendered_content = template.render(args)
         
         # Filtrar líneas que empiezan con # pero no con #EXT
-        rendered_content = response.body.decode('utf-8')
         filtered_lines = [
             line for line in rendered_content.split('\n')
             if not (line.startswith('#') and not line.startswith('#EXT'))
         ]
         filtered_content = '\n'.join(filtered_lines)
         
-        return Response(content=filtered_content, media_type='text/plain', headers=response.headers)
+        return Response(content=filtered_content, media_type='text/plain')
 
     except Exception as e:
         logger.error(f"Error generando M3U: {str(e)}")
