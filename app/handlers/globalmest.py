@@ -183,16 +183,22 @@ async def _resolve_globalmest_url(url: str) -> tuple[str, str]:
             else:
                 logger.debug("WARNING: Player script not found in DOM")
 
-            # Esperar a que el player inicialice y haga peticiones m3u8
+            # Esperar a que el player haga peticiones m3u8.
+            # Si el script se inyectó bien pero no hay actividad de red tras 3s,
+            # el player no va a hacer peticiones (necesita interacción del usuario
+            # o contexto que no existe en headless). En ese caso el fallback con
+            # JWT resuelve el stream, así que no tiene sentido esperar más.
             logger.debug("Waiting for m3u8 capture...")
-            for i in range(120):  # 120 x 100ms = 12s
+            wait_limit = 30 if not player_script_url else 3  # 3s si script inyectado, 30s si no
+            iterations = wait_limit * 10
+            for i in range(iterations):
                 if master_captured:
                     logger.debug(f"✅ Master captured in ~{i * 100}ms after inject")
                     break
                 await page.wait_for_timeout(100)
 
             if not master_captured:
-                logger.debug(f"Master not captured in 12s, total m3u8 URLs: {len(m3u8_urls)}")
+                logger.debug(f"Master not captured in {wait_limit}s, total m3u8 URLs: {len(m3u8_urls)}")
 
             # Obtener HTML para extraer JWT
             html_content = await page.content()
@@ -252,7 +258,7 @@ async def _resolve_globalmest_url(url: str) -> tuple[str, str]:
 @router.get("/globalmest/extract")
 async def globalmest_extract(
     url: str = Query(..., description="URL de la página con el reproductor GlobalMEST"),
-    quality: str = Query("720", description="Calidad: 1080, 720, 480")
+    quality: str = Query("1080", description="Calidad: 1080, 720, 480")
 ):
     """
     Extrae la URL del stream m3u8 de GlobalMEST capturando el tráfico de red
