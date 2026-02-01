@@ -21,9 +21,10 @@ from config import (
 from utils import setup_logging
 
 # Importar routers
-from handlers import streamlink_router, acestream_router, hls_router, brightcove_router
+from handlers import streamlink_router, acestream_router, hls_router, brightcove_router, globalmest_router
 from handlers.acestream import set_http_session as set_acestream_session
 from handlers.brightcove import set_http_session as set_brightcove_session
+from handlers.globalmest import set_http_session as set_globalmest_session
 
 # Configurar logging
 logger = setup_logging(LOG_LEVEL)
@@ -105,6 +106,7 @@ async def lifespan(app: FastAPI):
     # Inyectar sesión en handlers que la necesitan
     set_acestream_session(http_session)
     set_brightcove_session(http_session)
+    set_globalmest_session(http_session)
     
     logger.info("Aplicación iniciada - conectando a acestream externo")
     
@@ -133,6 +135,7 @@ app.include_router(streamlink_router, tags=["streamlink"])
 app.include_router(acestream_router, tags=["acestream"])
 app.include_router(hls_router, tags=["hls"])
 app.include_router(brightcove_router, tags=["brightcove"])
+app.include_router(globalmest_router, tags=["globalmest"])
 
 # Middleware de seguridad
 @app.middleware("http")
