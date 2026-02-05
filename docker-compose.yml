@@ -1,121 +1,99 @@
+x-localstreams-base: &localstreams-base
+  image: franlerma/localstreams
+  container_name: localstreams
+  ports:
+    - "15123:15123"
+  volumes:
+    - /dev/dri:/dev/dri
+    - /opt/docker/volumes/localstreams/m3u:/data/m3u
+    - /opt/docker/volumes/localstreams/picon:/data/picon
+    - /opt/docker/volumes/localstreams/tmp:/tmp/acestream-cache
+  environment:
+    - ACESTREAM_PROXY_PORT=8080
+    - ACESTREAM_POLL_TIME=0
+    - ACESTRAM_RETRY_TOTAL=10
+    - APP_LOG_LEVEL=DEBUG
+  labels:
+    - com.centurylinklabs.watchtower.enable=false
+    - wud.watch=false
+  restart: always
+  stdin_open: true
+  tty: true
+  dns:
+    - 1.1.1.1
+    - 1.0.0.1
+  networks:
+    - media-network
+
+x-acexy-base: &acexy-base
+  image: ghcr.io/javinator9889/acexy:latest
+  restart: always
+  ports:
+    - 8080:8080/tcp
+  environment:
+    ACEXY_LISTEN_ADDR: ":8080"
+    ACEXY_SCHEME: "http"
+    ACEXY_PORT: "6878"
+    ACEXY_M3U8_STREAM_TIMEOUT: "60s"
+    ACEXY_M3U8: "false"
+    ACEXY_EMPTY_TIMEOUT: "60s"
+    ACEXY_BUFFER_SIZE: 4MB
+    ACEXY_NO_RESPONSE_TIMEOUT: "10s"
+  networks:
+    - media-network
+
+x-acestream-base: &acestream-base
+  container_name: acestream
+  image: martinbjeldbak/acestream-http-proxy:latest
+  platform: linux/amd64
+  restart: always
+  volumes:
+    - /opt/docker/volumes/localstreams/tmp/acestream:/home/appuser/.ACEStream
+
 services:
 
   localstreams-regular:
-    image: franlerma/localstreams
-    container_name: localstreams
+    <<: *localstreams-base
     profiles: [ 'regular' ]
-    ports:
-      - "15123:15123"
-    volumes:
-      - /dev/dri:/dev/dri
-      - /opt/docker/volumes/localstreams/m3u:/data/m3u
-      - /opt/docker/volumes/localstreams/picon:/data/picon
-      - /opt/docker/volumes/localstreams/tmp:/tmp/acestream-cache
     environment:
       - ACESTREAM_PROXY_HOST=acexy-regular
-      - ACESTREAM_PROXY_PORT=8080
-      - ACESTREAM_POLL_TIME=0
-      - ACESTRAM_RETRY_TOTAL=10
-      - APP_LOG_LEVEL=DEBUG
-    labels:
-      - com.centurylinklabs.watchtower.enable=false
-      - wud.watch=false
-    restart: always
-    stdin_open: true
-    tty: true
-    dns:
-      - 1.1.1.1
-      - 1.0.0.1
     depends_on:
       - acexy-regular
-    networks:
-      - media-network
 
   localstreams-warp:
-    image: franlerma/localstreams
-    container_name: localstreams
+    <<: *localstreams-base
     profiles: [ 'warp' ]
-    ports:
-      - "15123:15123"
-    volumes:
-      - /dev/dri:/dev/dri
-      - /opt/docker/volumes/localstreams/m3u:/data/m3u
-      - /opt/docker/volumes/localstreams/picon:/data/picon
-      - /opt/docker/volumes/localstreams/tmp:/tmp/acestream-cache
     environment:
       - ACESTREAM_PROXY_HOST=acexy-warp
-      - ACESTREAM_PROXY_PORT=8080
-      - ACESTREAM_POLL_TIME=0
-      - ACESTRAM_RETRY_TOTAL=10
-      - APP_LOG_LEVEL=DEBUG
-    labels:
-      - com.centurylinklabs.watchtower.enable=false
-      - wud.watch=false
-    restart: always
-    stdin_open: true
-    tty: true
     depends_on:
       - acexy-warp
       - acestream-warp
       - warp
-    networks:
-      - media-network
 
   acexy-regular:
+    <<: *acexy-base
     container_name: acexy
-    image: ghcr.io/javinator9889/acexy:latest
     profiles: [ 'regular' ]
-    restart: always
-    ports:
-      - 8080:8080/tcp
     environment:
-      ACEXY_LISTEN_ADDR: ":8080"  # Listen on port 8080
-      ACEXY_SCHEME: "http"        # Use HTTP
-      ACEXY_HOST: "acestream"     # Host is "acestream" or the name of the AceStream service
-      ACEXY_PORT: "6878"          # Port is 6878
-      ACEXY_M3U8_STREAM_TIMEOUT: "60s"  # Timeout is 60 seconds when in M3U8 mode
-      ACEXY_M3U8: "false"         # Disable M3U8 mode
-      ACEXY_EMPTY_TIMEOUT: "60s"  # Timeout to close the connection if no data is received
-      ACEXY_BUFFER_SIZE: 4MB      # Buffer size is 4MB
-      ACEXY_NO_RESPONSE_TIMEOUT: "10s"  # Timeout to close the connection if no response is received
+      ACEXY_HOST: "acestream"
     links:
       - acestream-regular
     depends_on:
       - acestream-regular
-    networks:
-      - media-network
 
   acexy-warp:
-    image: ghcr.io/javinator9889/acexy:0.2.0
+    <<: *acexy-base
     profiles: [ 'warp' ]
-    restart: always
-    ports:
-      - 8080:8080/tcp
     environment:
-      ACEXY_LISTEN_ADDR: ":8080"  # Listen on port 8080
-      ACEXY_SCHEME: "http"        # Use HTTP
-      ACEXY_HOST: "warp"     # Host is "acestream" or the name of the AceStream service
-      ACEXY_PORT: "6878"          # Port is 6878
-      ACEXY_M3U8_STREAM_TIMEOUT: "60s"  # Timeout is 60 seconds when in M3U8 mode
-      ACEXY_M3U8: "false"         # Disable M3U8 mode
-      ACEXY_EMPTY_TIMEOUT: "60s"  # Timeout to close the connection if no data is received
-      ACEXY_BUFFER_SIZE: 4MB      # Buffer size is 4MB
-      ACEXY_NO_RESPONSE_TIMEOUT: "10s"  # Timeout to close the connection if no response is received
+      ACEXY_HOST: "warp"
     links:
-      - warp  # Conectar a warp ya que acestream comparte su red
+      - warp
     depends_on:
-      - warp  # Cambiar dependencia a warp
-    networks:
-      - media-network
+      - warp
 
   acestream-regular:
-    container_name: acestream
-    image: martinbjeldbak/acestream-http-proxy:latest
+    <<: *acestream-base
     profiles: [ 'regular' ]
-    platform: linux/amd64
-    restart: always
-    volumes:
-      - /opt/docker/volumes/localstreams/tmp/acestream:/home/appuser/.ACEStream
     dns:
       - 1.1.1.1
       - 1.0.0.1
@@ -123,16 +101,11 @@ services:
       - media-network
 
   acestream-warp:
-    container_name: acestream
-    image: martinbjeldbak/acestream-http-proxy:latest
+    <<: *acestream-base
     profiles: [ 'warp' ]
-    platform: linux/amd64
-    restart: always
-    volumes:
-      - /opt/docker/volumes/localstreams/tmp/acestream:/home/appuser/.ACEStream
     depends_on:
       - warp
-    network_mode: "service:warp"  # Usar la misma interfaz de red que warp
+    network_mode: "service:warp"
 
   warp:
     image: caomingjun/warp:latest
@@ -146,8 +119,8 @@ services:
       - 'c 10:200 rwm'
     ports:
       - "1080:1080"
-      - "8621:8621"  # Puerto P2P principal de acestream
-      - "6881-6889:6881-6889"  # Rango de puertos para conexiones BitTorrent/P2P
+      - "8621:8621"
+      - "6881-6889:6881-6889"
     environment:
       - WARP_SLEEP=2
       # - WARP_LICENSE_KEY= # optional
@@ -163,7 +136,6 @@ services:
     networks:
       - media-network
 
-# Red personalizada para comunicación entre contenedores
 networks:
   media-network:
     driver: bridge
