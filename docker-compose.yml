@@ -44,7 +44,8 @@ x-acexy-base: &acexy-base
 
 x-acestream-base: &acestream-base
   container_name: acestream
-  image: martinbjeldbak/acestream-http-proxy:latest
+  #image: martinbjeldbak/acestream-http-proxy:latest
+  image: blaiseio/acelink:latest
   platform: linux/amd64
   restart: always
   volumes:
@@ -60,15 +61,15 @@ services:
     depends_on:
       - acexy-regular
 
-  localstreams-warp:
+  localstreams-vpn:
     <<: *localstreams-base
-    profiles: [ 'warp' ]
+    profiles: [ 'vpn' ]
     environment:
-      - ACESTREAM_PROXY_HOST=acexy-warp
+      - ACESTREAM_PROXY_HOST=acexy-vpn
     depends_on:
-      - acexy-warp
-      - acestream-warp
-      - warp
+      - acexy-vpn
+      - acestream-vpn
+      - gluetun
 
   acexy-regular:
     <<: *acexy-base
@@ -81,15 +82,15 @@ services:
     depends_on:
       - acestream-regular
 
-  acexy-warp:
+  acexy-vpn:
     <<: *acexy-base
-    profiles: [ 'warp' ]
+    profiles: [ 'vpn' ]
     environment:
-      ACEXY_HOST: "warp"
+      ACEXY_HOST: "gluetun"
     links:
-      - warp
+      - gluetun
     depends_on:
-      - warp
+      - gluetun
 
   acestream-regular:
     <<: *acestream-base
@@ -100,41 +101,74 @@ services:
     networks:
       - media-network
 
-  acestream-warp:
+  acestream-vpn:
     <<: *acestream-base
-    profiles: [ 'warp' ]
+    profiles: [ 'vpn' ]
+    # environment:
+    #   - ALLOW_REMOTE_ACCESS=yes 
+    #   - HTTP_PROXY=http://gluetun:8888
     depends_on:
-      - warp
-    network_mode: "service:warp"
+      - gluetun
+    network_mode: "service:gluetun"
+    #networks:
+    #  - media-network
 
-  warp:
-    image: caomingjun/warp:latest
-    container_name: warp
-    profiles: [ 'warp']
+  # warp:
+  #   image: caomingjun/warp:latest
+  #   container_name: warp
+  #   profiles: [ 'warp']
+  #   restart: always
+  #   privileged: true
+  #   devices:                   
+  #     - /dev/net/tun:/dev/net/tun
+  #   device_cgroup_rules:
+  #     - 'c 10:200 rwm'
+  #   ports:
+  #     - "1080:1080"
+  #     - "8621:8621"
+  #     - "6881-6889:6881-6889"
+  #   environment:
+  #     - WARP_SLEEP=2
+  #     # - WARP_LICENSE_KEY= # optional
+  #   cap_add:
+  #     - MKNOD
+  #     - AUDIT_WRITE
+  #     - NET_ADMIN
+  #   sysctls:
+  #     - net.ipv6.conf.all.disable_ipv6=0
+  #     - net.ipv4.conf.all.src_valid_mark=1
+  #   volumes:
+  #     - /tmp/data:/var/lib/cloudflare-warp
+  #   networks:
+  #     - media-network
+
+  gluetun:
+    image: qmcgaw/gluetun
+    profiles: [ 'vpn']
     restart: always
-    privileged: true
-    devices:                   
-      - /dev/net/tun:/dev/net/tun
-    device_cgroup_rules:
-      - 'c 10:200 rwm'
-    ports:
-      - "1080:1080"
-      - "8621:8621"
-      - "6881-6889:6881-6889"
-    environment:
-      - WARP_SLEEP=2
-      # - WARP_LICENSE_KEY= # optional
     cap_add:
-      - MKNOD
-      - AUDIT_WRITE
       - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     sysctls:
       - net.ipv6.conf.all.disable_ipv6=0
       - net.ipv4.conf.all.src_valid_mark=1
-    volumes:
-      - /tmp/data:/var/lib/cloudflare-warp
+    ports:
+      - "8888:8888/tcp"
+      - "1080:1080"
+      - "8621:8621"
+      - "6881-6889:6881-6889"
     networks:
       - media-network
+    environment:
+      - HTTPPROXY=on
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=wireguard
+      - VPN_ENDPOINT_IP=162.159.192.1
+      - VPN_ENDPOINT_PORT=2408
+      - WIREGUARD_PUBLIC_KEY=bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=
+      - WIREGUARD_PRIVATE_KEY=6AdkYWQn9rhnIDlaXH1GSjmcCR5B3RWxSBO6QWz0uEQ=
+      - WIREGUARD_ADDRESSES=172.16.0.2/32
 
 networks:
   media-network:

@@ -1,0 +1,16 @@
+{# Macros #}
+{% macro streamlink(url) -%}
+{{scheme}}://{{hostname}}:{{port}}/streamlink/video?url={{url}}
+{%- endmacro %}
+
+{% macro brightcove(url) -%}
+{{scheme}}://{{hostname}}:{{port}}/brightcove/extract?url={{url}}
+{%- endmacro %}
+
+{% macro acestream(id) -%}
+{{scheme}}://{{hostname}}:{{port}}/acestream/video?id={{id}}
+{%- endmacro %}
+
+{% macro globalmest(url) -%}
+{{scheme}}://{{hostname}}:{{port}}/globalmest/extract?url={{url}}
+{%- endmacro %}

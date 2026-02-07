@@ -285,27 +285,81 @@ Once services are started, the application will be available at:
 
 **File**: `/opt/docker/volumes/localstreams/m3u/example.m3u`
 
+#### Available Macros
+
+LocalStreams includes pre-defined Jinja2 macros in `app/templates/macros.j2` that are **automatically imported** into all M3U templates. These macros simplify URL generation:
+
+**Available macros:**
+- `streamlink(url)` - Generate StreamLink endpoint URL
+- `acestream(id)` - Generate AceStream endpoint URL
+- `brightcove(url)` - Generate Brightcove extractor endpoint URL
+- `globalmest(url)` - Generate GlobalMEST extractor endpoint URL
+
+**Template variables available in macros:**
+- `{{scheme}}` - Protocol (http/https)
+- `{{hostname}}` - Server hostname
+- `{{port}}` - Server port
+
+#### Example without macros (verbose):
+
 ```m3u
 #EXTM3U
 #EXTVLCOPT--http-reconnect=true
 
 #EXTINF:-1 tvg-logo="{{base_url}}/picon/la1.png" tvg-name="LA 1 HD" tvg-id="LA1.es", La 1
-{{base_url}}/streamlink/video?url=https://www.rtve.es/play/videos/directo/canales-lineales/la-1/
+{{scheme}}://{{hostname}}:{{port}}/streamlink/video?url=https://www.rtve.es/play/videos/directo/canales-lineales/la-1/
 
 #EXTINF:-1 tvg-logo="{{base_url}}/picon/telecinco.png" tvg-name="Telecinco" tvg-id="TELE5.es", Telecinco
-{{base_url}}/acestream/video?id=b897de3e62d7c6bee9ef1107d972f3d1075e03ff
+{{scheme}}://{{hostname}}:{{port}}/acestream/video?id=b897de3e62d7c6bee9ef1107d972f3d1075e03ff
 
 #EXTINF:-1 tvg-logo="{{base_url}}/picon/brightcove.png" tvg-name="Brightcove Channel" tvg-id="BC.es", Brightcove
-{{base_url}}/brightcove/extract?url=https://example.com/live
+{{scheme}}://{{hostname}}:{{port}}/brightcove/extract?url=https://example.com/live
+```
+
+#### Example with macros (recommended):
+
+```m3u
+#EXTM3U
+#EXTVLCOPT--http-reconnect=true
+
+#EXTINF:-1 tvg-logo="{{base_url}}/picon/la1.png" tvg-name="LA 1 HD" tvg-id="LA1.es", La 1
+{{ streamlink('https://www.rtve.es/play/videos/directo/canales-lineales/la-1/') }}
+
+#EXTINF:-1 tvg-logo="{{base_url}}/picon/telecinco.png" tvg-name="Telecinco" tvg-id="TELE5.es", Telecinco
+{{ acestream('b897de3e62d7c6bee9ef1107d972f3d1075e03ff') }}
+
+#EXTINF:-1 tvg-logo="{{base_url}}/picon/brightcove.png" tvg-name="Brightcove Channel" tvg-id="BC.es", Brightcove
+{{ brightcove('https://example.com/live') }}
+
+#EXTINF:-1 tvg-logo="{{base_url}}/picon/globalmest.png" tvg-name="7 Region de Murcia" tvg-id="7RM.es", 7RM
+{{ globalmest('https://www.la7tv.es/video/a-la-carta/7tv-en-directo/20220810150726000939.html') }}
 
 #EXTINF:-1 tvg-logo="{{base_url}}/picon/external.png" tvg-name="External Server" tvg-id="EXT.es", External Channel
 http://{{iptvserver}}/stream.ts
 ```
 
+#### Benefits of using macros:
+- ✅ **Cleaner templates**: Less repetitive code
+- ✅ **Easier maintenance**: Change URL structure in one place
+- ✅ **No imports needed**: Macros are auto-imported in all `.m3u` files
+- ✅ **Type safety**: Prevents typos in endpoint URLs
+
 **Access with variables**:
 ```
 http://localhost:15123/m3u/example.m3u?iptvserver=192.168.1.100:8080
 ```
+
+#### Adding custom macros:
+
+To add your own macros, edit `app/templates/macros.j2`:
+
+```jinja2
+{% macro my_custom_service(param) -%}
+{{scheme}}://{{hostname}}:{{port}}/my_service/endpoint?param={{param}}
+{%- endmacro %}
+```
+
+The macro will be automatically available in all M3U templates without any imports.
 
 ### StreamLink Plugins
 

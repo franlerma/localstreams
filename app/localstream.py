@@ -8,8 +8,10 @@ from typing import Optional
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.templating import Jinja2Templates
+from jinja2 import Environment, FileSystemLoader
 import aiohttp
 from aiohttp import ClientSession, ClientTimeout
+from pathlib import Path
 
 # Importar configuración
 from config import (
@@ -29,9 +31,59 @@ from handlers.globalmest import set_http_session as set_globalmest_session
 # Configurar logging
 logger = setup_logging(LOG_LEVEL)
 
-# Cache para templates M3U
-templates = Jinja2Templates(directory=M3U_DIR)
-templates.env.cache = None
+def setup_jinja_with_macros(m3u_dir):
+    """
+    Configura Jinja2Templates con auto-importación de todas las macros
+    encontradas en archivos .j2 del directorio app/templates/
+    
+    Las macros NO se cargan como módulos porque no tendrían acceso
+    al contexto de renderizado. En su lugar, se usa un preprocesador
+    que inyecta automáticamente {% from "macros.j2" import ... %}
+    """
+    # Directorio donde están las macros
+    macros_dir = Path(__file__).parent / 'templates'
+    
+    # Loader personalizado que auto-importa macros
+    class AutoImportLoader(FileSystemLoader):
+        def get_source(self, environment, template):
+            source, filename, uptodate = super().get_source(environment, template)
+            
+            # Solo preprocesar archivos .m3u (no los .j2 de macros)
+            if template.endswith('.m3u') and macros_dir.exists():
+                # Buscar todos los archivos .j2 y extraer nombres de macros
+                imports = []
+                for macro_file in macros_dir.iterdir():
+                    if macro_file.suffix == '.j2':
+                        # Leer el archivo para encontrar los nombres de macros
+                        try:
+                            macro_content = macro_file.read_text()
+                            import re
+                            macro_names = re.findall(r'{%\s*macro\s+(\w+)\s*\(', macro_content)
+                            if macro_names:
+                                imports.extend(macro_names)
+                        except Exception as e:
+                            logger.warning(f"Error leyendo macros de {macro_file.name}: {e}")
+                
+                # Inyectar el import automáticamente
+                if imports:
+                    import_line = "{% from 'macros.j2' import " + ", ".join(imports) + " with context %}\n"
+                    source = import_line + source
+                    logger.debug(f"Auto-importadas macros: {', '.join(imports)}")
+            
+            return source, filename, uptodate
+    
+    # Crear environment con el loader personalizado
+    env = Environment(loader=AutoImportLoader([m3u_dir, str(macros_dir)]))
+    env.cache = None
+    
+    # Crear Jinja2Templates con el environment configurado
+    jinja_templates = Jinja2Templates(directory=m3u_dir)
+    jinja_templates.env = env
+    
+    return jinja_templates
+
+# Cache para templates M3U con macros auto-importadas
+templates = setup_jinja_with_macros(M3U_DIR)
 
 # Variable global para la sesión HTTP
 http_session: Optional[ClientSession] = None
