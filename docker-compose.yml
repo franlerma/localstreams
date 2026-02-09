@@ -49,7 +49,7 @@ x-acestream-base: &acestream-base
   platform: linux/amd64
   restart: always
   volumes:
-    - /opt/docker/volumes/localstreams/tmp/acestream:/home/appuser/.ACEStream
+    - /opt/docker/volumes/localstreams/tmp/acestream:/home/localstreams/.ACEStream
 
 services:
 

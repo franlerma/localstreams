@@ -485,7 +485,6 @@ See `app/requirements.txt` for the complete list. Main dependencies:
 ## Credits 🙏
 
 - **AceXY Proxy**: Original project by [Javinator9889](https://github.com/Javinator9889/acexy)
-- **AceStream Orchestrator**: Fork used in this project by [krinkuto11](https://github.com/krinkuto11/acestream-orchestrator)
 
 ## License 📜
 
