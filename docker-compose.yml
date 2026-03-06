@@ -26,7 +26,7 @@ x-localstreams-base: &localstreams-base
     - localstreams-network
 
 x-acexy-base: &acexy-base
-  image: fralermo/acexy:latest
+  image: franlerma/acexy:latest
   restart: always
   ports:
     - 8080:8080/tcp
