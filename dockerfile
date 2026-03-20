@@ -18,8 +18,8 @@ ENV PYTHONUNBUFFERED=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Crear usuario no-root
-RUN groupadd -g 1001 appgroup && \
-    useradd -u 1001 -g appgroup -m appuser
+RUN groupadd -g 1001 localstreams && \
+    useradd -u 1001 -g localstreams -m localstreams
 
 # Instalar dependencias del sistema base
 RUN apt-get update && \
@@ -53,26 +53,26 @@ RUN apt-get update && \
 
 # Crear directorios
 RUN mkdir -p /app /data /ms-playwright && \
-    chown -R appuser:appgroup /app /data /ms-playwright
+    chown -R localstreams:localstreams /app /data /ms-playwright
 
-USER appuser
+USER localstreams
 WORKDIR /app
 
 # Copiar requirements y plugins
-COPY --chown=appuser:appgroup app/requirements.txt /app/
-COPY --chown=appuser:appgroup resources/plugins /home/appuser/.local/share/streamlink/plugins
+COPY --chown=localstreams:localstreams app/requirements.txt /app/
+COPY --chown=localstreams:localstreams resources/plugins /home/localstreams/.local/share/streamlink/plugins
 
 # Instalar dependencias Python y Playwright (sin --with-deps porque ya instalamos las deps del sistema)
 RUN pip install --user --no-cache-dir -r requirements.txt && \
     python -m playwright install chromium
 
 # Copiar código de aplicación
-COPY --chown=appuser:appgroup app/ /app/
-COPY --chown=appuser:appgroup data/ /data/
+COPY --chown=localstreams:localstreams app/ /app/
+COPY --chown=localstreams:localstreams data/ /data/
 
 EXPOSE 15123
 
-ENV PATH="/home/appuser/.local/bin:${PATH}"
+ENV PATH="/home/localstreams/.local/bin:${PATH}"
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD wget -q -t1 -O- 'http://127.0.0.1:15123/check_health' | grep -q '{"healthy":true}' || exit 1

@@ -23,33 +23,40 @@ x-localstreams-base: &localstreams-base
     - 1.1.1.1
     - 1.0.0.1
   networks:
-    - media-network
+    - localstreams-network
 
 x-acexy-base: &acexy-base
-  image: ghcr.io/javinator9889/acexy:latest
+  image: franlerma/acexy:latest
   restart: always
   ports:
     - 8080:8080/tcp
   environment:
-    ACEXY_LISTEN_ADDR: ":8080"
-    ACEXY_SCHEME: "http"
-    ACEXY_PORT: "6878"
-    ACEXY_M3U8_STREAM_TIMEOUT: "60s"
-    ACEXY_M3U8: "false"
-    ACEXY_EMPTY_TIMEOUT: "60s"
-    ACEXY_BUFFER_SIZE: 4MB
-    ACEXY_NO_RESPONSE_TIMEOUT: "10s"
-  networks:
-    - media-network
+    # Acexy core config
+      ACEXY_LISTEN_ADDR: ":8080"
+      ACEXY_SCHEME: "http"
+      ACEXY_M3U8_STREAM_TIMEOUT: "60s"
+      ACEXY_M3U8: "false"
+      ACEXY_EMPTY_TIMEOUT: "20s"
+      ACEXY_BUFFER_SIZE: "4MB"
+      ACEXY_NO_RESPONSE_TIMEOUT: "3s"
+      ACEXY_LOG_LEVEL: "INFO"
 
-x-acestream-base: &acestream-base
-  container_name: acestream
-  #image: martinbjeldbak/acestream-http-proxy:latest
-  image: blaiseio/acelink:latest
-  platform: linux/amd64
-  restart: always
-  volumes:
-    - /opt/docker/volumes/localstreams/tmp/acestream:/home/appuser/.ACEStream
+      # Orchestrator config
+      ACESTREAM_MIN_REPLICAS: "1"
+      ACESTREAM_MAX_REPLICAS: "5"
+      ACESTREAM_STREAMS_PER_INSTANCE: "3"
+      ACESTREAM_IDLE_TIMEOUT: "5s"
+      ACESTREAM_RECYCLE_TIMEOUT: "15s"
+      ACESTREAM_IMAGE: "wafy80/acestream:latest"
+      COMPOSE_PROFILE: "regular"
+
+      # Docker socket proxy
+      DOCKER_HOST: "tcp://localstreams-docker-proxy:2375"
+  depends_on:
+      localstreams-docker-proxy:
+        condition: service_started
+  networks:
+    - localstreams-network
 
 services:
 
@@ -71,76 +78,34 @@ services:
       - acestream-vpn
       - gluetun
 
+  localstreams-docker-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: localstreams-docker-proxy
+    privileged: true
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      POST: 1
+      DELETE: 1
+      NETWORKS: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - localstreams-network
+    restart: unless-stopped
+
   acexy-regular:
     <<: *acexy-base
     container_name: acexy
     profiles: [ 'regular' ]
-    environment:
-      ACEXY_HOST: "acestream"
-    links:
-      - acestream-regular
-    depends_on:
-      - acestream-regular
 
   acexy-vpn:
     <<: *acexy-base
     profiles: [ 'vpn' ]
-    environment:
-      ACEXY_HOST: "gluetun"
     links:
       - gluetun
     depends_on:
       - gluetun
-
-  acestream-regular:
-    <<: *acestream-base
-    profiles: [ 'regular' ]
-    dns:
-      - 1.1.1.1
-      - 1.0.0.1
-    networks:
-      - media-network
-
-  acestream-vpn:
-    <<: *acestream-base
-    profiles: [ 'vpn' ]
-    # environment:
-    #   - ALLOW_REMOTE_ACCESS=yes 
-    #   - HTTP_PROXY=http://gluetun:8888
-    depends_on:
-      - gluetun
-    network_mode: "service:gluetun"
-    #networks:
-    #  - media-network
-
-  # warp:
-  #   image: caomingjun/warp:latest
-  #   container_name: warp
-  #   profiles: [ 'warp']
-  #   restart: always
-  #   privileged: true
-  #   devices:                   
-  #     - /dev/net/tun:/dev/net/tun
-  #   device_cgroup_rules:
-  #     - 'c 10:200 rwm'
-  #   ports:
-  #     - "1080:1080"
-  #     - "8621:8621"
-  #     - "6881-6889:6881-6889"
-  #   environment:
-  #     - WARP_SLEEP=2
-  #     # - WARP_LICENSE_KEY= # optional
-  #   cap_add:
-  #     - MKNOD
-  #     - AUDIT_WRITE
-  #     - NET_ADMIN
-  #   sysctls:
-  #     - net.ipv6.conf.all.disable_ipv6=0
-  #     - net.ipv4.conf.all.src_valid_mark=1
-  #   volumes:
-  #     - /tmp/data:/var/lib/cloudflare-warp
-  #   networks:
-  #     - media-network
 
   gluetun:
     image: qmcgaw/gluetun
@@ -159,7 +124,7 @@ services:
       - "8621:8621"
       - "6881-6889:6881-6889"
     networks:
-      - media-network
+      - localstreams-network
     environment:
       - HTTPPROXY=on
       - VPN_SERVICE_PROVIDER=custom
@@ -171,5 +136,5 @@ services:
       - WIREGUARD_ADDRESSES=172.16.0.2/32
 
 networks:
-  media-network:
+  localstreams-network:
     driver: bridge
