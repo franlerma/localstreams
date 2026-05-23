@@ -294,6 +294,27 @@ LocalStreams includes pre-defined Jinja2 macros in `app/templates/macros.j2` tha
 - `acestream(id)` - Generate AceStream endpoint URL
 - `brightcove(url)` - Generate Brightcove extractor endpoint URL
 - `globalmest(url)` - Generate GlobalMEST extractor endpoint URL
+- `acestream_resolve(name)` - Auto-resolve AceStream hash by channel name (see below)
+
+**Resolución automática de canales AceStream:**
+
+La macro `acestream_resolve()` permite buscar y resolver automáticamente el mejor hash de AceStream para un canal, consultando listas M3U externas:
+
+```m3u
+#EXTINF:-1 tvg-name="Movistar LaLiga", Movistar LaLiga
+{{ acestream_resolve('Movistar LaLiga') }}
+```
+
+**Configuración vía variables de entorno:**
+- `ACESTREAM_RESOLVER_SOURCES` — URLs de listas M3U externas (separadas por coma)
+- `ACESTREAM_RESOLVER_REFRESH_INTERVAL` — Segundos entre refrescos de caché (default: 1800)
+- `ACESTREAM_RESOLVER_RESOLUTION_MODE` — `probe` (ffprobe) o `metadata` (tvg-attributes)
+
+**Comportamiento:**
+- Los canales se resuelven en paralelo antes de renderizar la plantilla
+- El sistema prueba múltiples candidatos y selecciona el de mayor resolución estable
+- Los resultados se cachean y refrescan periódicamente
+- Si ningún stream funciona, se devuelve el mejor candidato por metadatos
 
 **Template variables available in macros:**
 - `{{scheme}}` - Protocol (http/https)

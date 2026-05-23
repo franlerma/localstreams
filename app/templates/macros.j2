@@ -14,3 +14,7 @@
 {% macro globalmest(url) -%}
 {{scheme}}://{{hostname}}:{{port}}/globalmest/extract?url={{url}}
 {%- endmacro %}
+
+{% macro acestream_resolve(name) -%}
+{{scheme}}://{{hostname}}:{{port}}/acestream/video?id={{ resolved_channels.get(name, '') }}
+{%- endmacro %}

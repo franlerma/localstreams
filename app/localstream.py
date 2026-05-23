@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import signal
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -27,6 +28,9 @@ from handlers import streamlink_router, acestream_router, hls_router, brightcove
 from handlers.acestream import set_http_session as set_acestream_session
 from handlers.brightcove import set_http_session as set_brightcove_session
 from handlers.globalmest import set_http_session as set_globalmest_session
+
+# Importar Acestream Resolver
+from acestreamresolver import StreamResolver, ResolverConfig
 
 # Configurar logging
 logger = setup_logging(LOG_LEVEL)
@@ -88,6 +92,9 @@ templates = setup_jinja_with_macros(M3U_DIR)
 # Variable global para la sesión HTTP
 http_session: Optional[ClientSession] = None
 
+# Instancia global del resolver de Acestream
+resolver_instance: Optional[StreamResolver] = None
+
 def print_available_playlists():
     """Imprime las URLs de acceso de todas las listas de reproducción disponibles"""
     try:
@@ -129,8 +136,12 @@ async def check_health() -> bool:
         return False
 
 async def shutdown():
-    global http_session
+    global http_session, resolver_instance
     logger.info("Iniciando apagado controlado...")
+
+    # Detener Acestream Resolver
+    if resolver_instance:
+        await resolver_instance.stop()
 
     # Cerrar sesión HTTP
     if http_session and not http_session.closed:
@@ -154,6 +165,12 @@ async def lifespan(app: FastAPI):
         connector=aiohttp.TCPConnector(limit=MAX_CONNECTIONS, ssl=False),
         timeout=ClientTimeout(total=30)
     )
+    
+    # Inicializar Acestream Hash Resolver
+    global resolver_instance
+    resolver_config = ResolverConfig()
+    resolver_instance = StreamResolver(resolver_config)
+    await resolver_instance.start()
     
     # Inyectar sesión en handlers que la necesitan
     set_acestream_session(http_session)
@@ -231,6 +248,21 @@ async def generate_m3u(request: Request, m3u_file: str):
             "base_url": base_url
         }
         args.update(params)
+
+        # Pre-resolver canales acestream si el resolver está activo
+        if resolver_instance:
+            raw = Path(M3U_DIR, f"{m3u_file}.m3u").read_text(encoding="utf-8")
+            channel_names = list(set(
+                re.findall(r"acestream_resolve\(['\"](.+?)['\"]\)", raw)
+            ))
+            resolved_channels = {
+                name: resolver_instance.lookup_from_cache(name)
+                for name in channel_names
+            }
+            args["resolved_channels"] = resolved_channels
+        else:
+            resolved_channels = {}
+            args["resolved_channels"] = resolved_channels
 
         # Renderizar el template manualmente
         template = templates.get_template(f"{m3u_file}.m3u")
