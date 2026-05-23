@@ -38,7 +38,7 @@ x-acexy-base: &acexy-base
       ACEXY_M3U8: "false"
       ACEXY_EMPTY_TIMEOUT: "20s"
       ACEXY_BUFFER_SIZE: "4MB"
-      ACEXY_NO_RESPONSE_TIMEOUT: "3s"
+      ACEXY_NO_RESPONSE_TIMEOUT: "10s"
       ACEXY_LOG_LEVEL: "INFO"
 
       # Orchestrator config
@@ -47,7 +47,7 @@ x-acexy-base: &acexy-base
       ACESTREAM_STREAMS_PER_INSTANCE: "3"
       ACESTREAM_IDLE_TIMEOUT: "5s"
       ACESTREAM_RECYCLE_TIMEOUT: "15s"
-      ACESTREAM_IMAGE: "wafy80/acestream:latest"
+      ACESTREAM_IMAGE: "blaiseio/acelink:latest"
       COMPOSE_PROFILE: "regular"
 
       # Docker socket proxy
