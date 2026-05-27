@@ -118,19 +118,13 @@ class M3USourceManager:
         entries: list[AcestreamEntry] = []
         for url, result in zip(urls, results):
             if isinstance(result, Exception):
-                logger.warning(
-                    "M3U source raised an exception: %s -- %s",
-                    url,
-                    result,
-                )
+                logger.warning("❌ %s — error: %s", url, result)
                 continue
+            count = len(result)
+            status = "✅" if count > 0 else "❌ (sin IDs acestream)"
+            logger.info("%s %s — %d IDs", status, url, count)
             entries.extend(result)
 
-        logger.info(
-            "Fetched %d AceStream entries from %d M3U sources",
-            len(entries),
-            len(urls),
-        )
         return entries
 
     def _parse_m3u(self, content: str, source_url: str) -> list[AcestreamEntry]:

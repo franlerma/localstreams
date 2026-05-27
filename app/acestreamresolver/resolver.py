@@ -66,10 +66,9 @@ class StreamResolver:
         self._source_manager = M3USourceManager(self.config, self._http)
         self._prober = StreamProber(self.config, self._http)
 
-        # Warm up: initial source download (non-blocking if sources not set)
+        # Warm up: initial source download
         try:
-            entries = await self._source_manager.fetch_all()
-            logger.info("Warmup: fetched %d AceStream entries", len(entries))
+            await self._source_manager.fetch_all()
         except Exception as e:
             logger.warning("Warmup source fetch failed: %s", e)
 
@@ -294,15 +293,20 @@ class StreamResolver:
                 name_to_candidates[name] = candidates
                 for c in candidates:
                     all_candidate_hashes.add(c.hash)
+            else:
+                logger.info("Resolution: no candidates for '%s'", name)
 
         if not all_candidate_hashes:
-            logger.debug("No matching candidates found for any missing name")
+            logger.info(
+                "Resolution: no matching candidates found for %d missing names",
+                len(missing),
+            )
             return {}
 
         # 2. Probe all unique candidate hashes in parallel
         #    Use asyncio.wait for graceful partial-results on timeout.
-        logger.debug(
-            "Probing %d unique candidate hashes for %d names",
+        logger.info(
+            "Probing %d unique hashes for %d names",
             len(all_candidate_hashes),
             len(missing),
         )
@@ -359,20 +363,14 @@ class StreamResolver:
                 continue
 
             best_hash = self._pick_best_hash(name, candidates, probe_results)
+
+            # Cache successful resolutions
             if best_hash is not None:
                 resolved[name] = best_hash
-            else:
-                # All probed candidates failed — keep cached hash as fallback
-                fallback = self._cache.get_fallback(name)
-                resolved[name] = fallback.hash if fallback else ""
-
-            if best_hash is not None:
                 pr = probe_results.get(best_hash)
                 if pr is not None:
                     resolution_str = (
-                        f"{pr.width}x{pr.height}"
-                        if pr.width and pr.height
-                        else "unknown"
+                        f"{pr.width}x{pr.height}" if pr.width and pr.height else "unknown"
                     )
                     channel = ResolvedChannel(
                         channel_name=name,
@@ -383,6 +381,24 @@ class StreamResolver:
                         expires_at=time.time() + self.config.refresh_interval,
                     )
                     self._cache.set(name, channel)
+                    logger.info(
+                        "Resolved '%s' → %s (%s, score=%.0f)",
+                        name, best_hash[:8], resolution_str, pr.score,
+                    )
+                else:
+                    resolved[name] = best_hash
+            else:
+                # All probed candidates failed — keep cached hash as fallback
+                fallback = self._cache.get_fallback(name)
+                if fallback:
+                    resolved[name] = fallback.hash
+                    logger.info(
+                        "All probes failed for '%s' — keeping cached fallback %s",
+                        name, fallback.hash[:8],
+                    )
+                else:
+                    resolved[name] = ""
+                    logger.warning("All probes failed for '%s' — no cached fallback", name)
 
         return resolved
 
@@ -477,23 +493,42 @@ class StreamResolver:
                 continue
 
             # Silence check on the currently cached stream
-            url = f"{self.config.acexy_base}/ace/getstream?id={current_hash}"
+            url = f"http://127.0.0.1:{self.config.app_port}/acestream/video?id={current_hash}"
             is_silent, max_db = await self._prober.check_silence(url)
 
-            if not is_silent:
-                logger.debug(
-                    "Background refine: '%s' (hash=%s…) audio OK (max_volume=%.1f dB)",
-                    norm_name,
-                    current_hash[:8],
-                    max_db,
+            swap_reason = None
+            if is_silent:
+                swap_reason = f"SILENT (max_volume={max_db:.1f} dB)"
+            else:
+                # Stream has audio — check visual quality
+                cached_entry = self._cache.get_fallback(norm_name)
+                width, height = 1280, 720
+                if cached_entry:
+                    res_parts = cached_entry.resolution.split("x") if "x" in cached_entry.resolution else []
+                    if len(res_parts) == 2:
+                        try:
+                            width, height = int(res_parts[0]), int(res_parts[1])
+                        except ValueError:
+                            pass
+
+                has_artifacts, quality = await self._prober.assess_quality(
+                    current_hash, width, height, 0.0,
                 )
-                continue  # Stream is fine
+
+                if has_artifacts:
+                    swap_reason = f"visual artifacts (quality={quality.get('composite', 0.0):.2f})"
+                else:
+                    logger.debug(
+                        "Background refine: '%s' OK (hash=%s… audio=OK visual=OK)",
+                        norm_name, current_hash[:8],
+                    )
+                    continue  # Stream is fine, nothing to do
 
             logger.warning(
-                "Background refine: '%s' (hash=%s…) is SILENT (max_volume=%.1f dB) — searching alternatives",
+                "Background refine: '%s' (hash=%s…) %s — searching alternatives",
                 norm_name,
                 current_hash[:8],
-                max_db,
+                swap_reason,
             )
 
             # Find alternative candidates for this name

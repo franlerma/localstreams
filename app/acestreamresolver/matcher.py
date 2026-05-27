@@ -44,35 +44,51 @@ class ChannelMatcher:
     ) -> list[AcestreamEntry]:
         """Find entries matching *name*, sorted by descending score.
 
-        Parameters
-        ----------
-        name:
-            Channel name to look up (e.g. ``"Movistar LaLiga"``).
-        entries:
-            Pool of known entries to search against.
-        threshold:
-            Minimum ``token_sort_ratio`` score (0‑100) for entries whose
-            extra tokens are all quality suffixes.
-        strict_threshold:
-            Higher threshold for entries whose extra tokens include
-            non‑quality words (channel numbers, different names).
-
-        Returns
-        -------
-        list[AcestreamEntry]
-            Matching entries sorted by score descending.  When two entries
-            have the same score, the one whose ``tvg_name`` matches *name*
-            exactly is preferred.
+        **Two‑phase matching**: first scores against ``entry.name`` and
+        ``entry.tvg_name``.  If nothing passes, falls back to ``entry.tvg_id``
+        to catch entries whose display name is cluttered with batch labels.
         """
         normalized_query = self._normalize(name)
+
+        # --- Phase 1: name + tvg_name ---
+        candidates = self._score_entries(
+            normalized_query, entries, threshold, strict_threshold, use_tvg_id=False
+        )
+        if candidates:
+            return candidates
+
+        # --- Phase 2: fallback to tvg_id ---
+        logger.info(
+            "No name/tvg_name match for '%s' — trying tvg_id",
+            normalized_query,
+        )
+        candidates = self._score_entries(
+            normalized_query, entries, threshold, strict_threshold, use_tvg_id=True
+        )
+        return candidates
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _score_entries(
+        self,
+        normalized_query: str,
+        entries: list[AcestreamEntry],
+        threshold: int,
+        strict_threshold: int,
+        *,
+        use_tvg_id: bool,
+    ) -> list[AcestreamEntry]:
+        """Score and filter entries, returning sorted list of matches."""
         scored: list[tuple[int, int, AcestreamEntry]] = []
 
         for entry in entries:
-            score = self.score(name, entry)
+            score = self._score_entry(normalized_query, entry, use_tvg_id=use_tvg_id)
 
-            # If the entry has extra tokens that aren't quality suffixes,
-            # require a higher threshold to avoid accidental matches
-            # (e.g. "DAZN LaLiga" → "DAZN LaLiga 2 1080p").
+            # If the entry has extra tokens with digits (channel numbers
+            # like "2", not batch labels like "new era"), require higher
+            # threshold to avoid accidental matches.
             effective = (
                 strict_threshold
                 if self._has_non_quality_extras(normalized_query, entry)
@@ -80,43 +96,45 @@ class ChannelMatcher:
             )
 
             if score < effective:
-                logger.debug(
-                    "Unmatched entry: %s (score=%d, threshold=%d)",
-                    entry.name,
-                    score,
-                    effective,
-                )
+                if score > 40:
+                    logger.warning(
+                        "Unmatched: query='%s' vs entry='%s' tvg='%s' tvg_id='%s' — score=%d threshold=%d",
+                        normalized_query,
+                        self._normalize(entry.name),
+                        self._normalize(entry.tvg_name) if entry.tvg_name else "",
+                        self._normalize_id(entry.tvg_id) if entry.tvg_id else "",
+                        score,
+                        effective,
+                    )
                 continue
 
-            # Tiebreaker flag — exact tvg_name match wins ties.
+            # Tiebreaker — exact tvg_name match wins ties.
             exact_tvg = 1 if self._tvg_matches_exactly(normalized_query, entry) else 0
             scored.append((score, exact_tvg, entry))
 
-        # Descending by score, then by exact-tvg-name tiebreaker.
         scored.sort(key=lambda x: (-x[0], -x[1]))
         return [entry for _, _, entry in scored]
 
-    def score(self, name: str, entry: AcestreamEntry) -> int:
-        """Compute a match score (0‑100) between *name* and *entry*.
-
-        Evaluates both ``entry.name`` and ``entry.tvg_name`` and returns
-        the highest score of the two.
-        """
-        normalized_query = self._normalize(name)
-
-        name_score = fuzz.token_sort_ratio(
-            normalized_query,
-            self._normalize(entry.name),
-        )
-
-        tvg_score = 0
+    def _score_entry(
+        self,
+        normalized_query: str,
+        entry: AcestreamEntry,
+        *,
+        use_tvg_id: bool,
+    ) -> int:
+        """Score a single entry, optionally including tvg_id."""
+        scores = [
+            fuzz.token_sort_ratio(normalized_query, self._normalize(entry.name)),
+        ]
         if entry.tvg_name:
-            tvg_score = fuzz.token_sort_ratio(
-                normalized_query,
-                self._normalize(entry.tvg_name),
+            scores.append(
+                fuzz.token_sort_ratio(normalized_query, self._normalize(entry.tvg_name)),
             )
-
-        return max(name_score, tvg_score)
+        if use_tvg_id and entry.tvg_id:
+            scores.append(
+                fuzz.token_sort_ratio(normalized_query, self._normalize_id(entry.tvg_id)),
+            )
+        return max(scores)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -139,11 +157,11 @@ class ChannelMatcher:
     def _has_non_quality_extras(
         self, normalized_query: str, entry: AcestreamEntry
     ) -> bool:
-        """Return ``True`` when *entry*'s name or tvg_name contains extra
-        tokens (beyond those in *query*) that are NOT quality suffixes.
+        """Return ``True`` when extra tokens include digits — indicating
+        a potentially different channel ("DAZN LaLiga 2" vs "DAZN LaLiga").
 
-        This prevents "DAZN LaLiga" from matching "DAZN LaLiga 2 1080p"
-        while still allowing "La 1" → "La 1 HD".
+        Batch labels like "new era", "elcano", "new loop iii" are safe
+        because they don't change the channel identity.
         """
         query_tokens = set(normalized_query.split())
 
@@ -152,10 +170,25 @@ class ChannelMatcher:
                 continue
             target_tokens = set(self._normalize(target_text).split())
             extra = target_tokens - query_tokens
-            if extra and not extra.issubset(_QUALITY_TOKENS):
+            # Only worry about non-quality tokens that contain digits
+            dangerous = {t for t in extra if t not in _QUALITY_TOKENS and bool(re.search(r"\d", t))}
+            if dangerous:
                 return True
 
         return False
+
+    # keep public wrapper for external callers (resolver._pick_best_hash)
+
+    def score(self, name: str, entry: AcestreamEntry) -> int:
+        """Public wrapper — scores with tvg_id included (fallback mode)."""
+        return self._score_entry(self._normalize(name), entry, use_tvg_id=True)
+
+    def _normalize_id(self, text: str) -> str:
+        """Normalize a tvg-id: lowercase, strip country TLD and dots."""
+        _id = text.lower().strip()
+        _id = re.sub(r"\.(es|sp|uk|us|com|net|org|tv|fr|de|it|pt|mx|ar|cl|pe|co|ve|ec|bo|py|uy)$", "", _id)
+        _id = re.sub(r"[^a-z0-9\s]", "", _id)
+        return _id
 
     def _tvg_matches_exactly(
         self, normalized_query: str, entry: AcestreamEntry

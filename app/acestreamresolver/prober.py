@@ -24,7 +24,29 @@ from .config import ResolverConfig
 
 logger = logging.getLogger("LocalStreams.resolver.prober")
 
+# ---- helpers -----------------------------------------------------------
 
+def _bitrate_ok(bitrate_bps: float, pixels: int) -> tuple[bool, float]:
+    """Check whether *bitrate_bps* is adequate for *pixels*.
+
+    Returns ``(ok, score)`` where *score* is a 0‑1 quality estimate.
+    """
+    if bitrate_bps <= 0 or pixels <= 0:
+        return False, 0.5
+
+    # Reasonable minimums:  2 Mbps for 1080p, 1 Mbps for 720p, etc.
+    min_bps = (pixels / (1920 * 1080)) * 2_000_000
+    ratio = bitrate_bps / min_bps
+
+    if ratio >= 1.0:
+        return True, 1.0
+    if ratio >= 0.6:
+        return True, 0.7
+    if ratio >= 0.3:
+        return True, 0.4
+    return False, 0.1
+
+# ---- StreamProber -----------------------------------------------------
 class StreamProber:
     """Probes AceStream candidates for resolution and stability.
 
@@ -85,7 +107,7 @@ class StreamProber:
         # Run resolution+audio and stability checks concurrently.
         # Probing through localstreams' own proxy (not acexy directly) so
         # the built-in retry/patience logic gives cold engines time to start.
-        (width, height, has_audio), (stability_ratio, stable) = await asyncio.gather(
+        (width, height, has_audio), (stability_ratio, stable, avg_bitrate_bps) = await asyncio.gather(
             self._probe_resolution(url),
             self._measure_stability(url),
         )
@@ -114,6 +136,7 @@ class StreamProber:
             stable=stable,
             has_audio=has_audio,
             score=score,
+            avg_bitrate_bps=avg_bitrate_bps,
         )
 
     # ------------------------------------------------------------------
@@ -191,7 +214,7 @@ class StreamProber:
     # Stability measurement
     # ------------------------------------------------------------------
 
-    async def _measure_stability(self, url: str) -> tuple[float, bool]:
+    async def _measure_stability(self, url: str) -> tuple[float, bool, float]:
         """Measure stream stability via aiohttp chunked reads.
 
         Connects to *url* and reads chunks in 1‑second intervals for
@@ -200,10 +223,8 @@ class StreamProber:
 
         Returns
         -------
-        tuple[float, bool]
-            ``(stability_ratio, is_stable)`` where *stability_ratio* is
-            ``active_intervals / total_intervals`` and *is_stable* is
-            ``True`` when the ratio is ≥ 0.5.
+        tuple[float, bool, float]
+            ``(stability_ratio, is_stable, avg_bitrate_bps)``
         """
         total_intervals = self.config.stability_sample
         timeout = aiohttp.ClientTimeout(total=self.config.probe_timeout)
@@ -214,15 +235,17 @@ class StreamProber:
                     logger.warning(
                         "Stability check: HTTP %d for %s", response.status, url
                     )
-                    return 0.0, False
+                    return 0.0, False, 0.0
 
                 intervals_with_data = 0
                 start = time.monotonic()
                 bytes_in_interval = 0
+                total_bytes = 0
                 current_interval = 0
 
                 async for chunk in response.content.iter_chunked(8192):
                     bytes_in_interval += len(chunk)
+                    total_bytes += len(chunk)
                     elapsed = time.monotonic() - start
                     interval = int(elapsed)
 
@@ -243,11 +266,152 @@ class StreamProber:
 
                 stability_ratio = intervals_with_data / total_intervals
                 is_stable = stability_ratio >= 0.5
-                return stability_ratio, is_stable
+                elapsed_total = time.monotonic() - start
+                avg_bitrate_bps = (total_bytes * 8) / max(elapsed_total, 0.1)
+                return stability_ratio, is_stable, avg_bitrate_bps
 
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
             logger.warning("Stability check failed for %s: %s", url, exc)
-            return 0.0, False
+            return 0.0, False, 0.0
+
+    # ------------------------------------------------------------------
+    # Quality assessment (background refinement)
+    # ------------------------------------------------------------------
+
+    async def assess_quality(self, hash: str, width: int, height: int, avg_bitrate_bps: float) -> tuple[bool, dict[str, float]]:
+        """Run all three quality checks and return a verdict.
+
+        Returns ``(has_artifacts, details)`` where *details* contains each
+        check's score (0 = worst, 1 = best).  A stream is flagged for
+        artifacts when the weighted composite falls below 0.5.
+        """
+        url = f"http://127.0.0.1:{self.config.app_port}/acestream/video?id={hash}"
+        pixels = width * height
+
+        # 1. Bitrate vs. resolution (40% weight)
+        br_ok, br_score = _bitrate_ok(avg_bitrate_bps, pixels)
+
+        # 2. SSIM structural similarity (40% weight)
+        ssim_score = await self._check_ssim(url)
+
+        # 3. Grid / blocking detection (20% weight)
+        grid_score = await self._check_blocking(url)
+
+        composite = 0.4 * br_score + 0.4 * ssim_score + 0.2 * grid_score
+        has_artifacts = composite < 0.5
+
+        details = {
+            "bitrate_score": br_score,
+            "bitrate_bps": avg_bitrate_bps,
+            "ssim_score": ssim_score,
+            "grid_score": grid_score,
+            "composite": composite,
+        }
+        return has_artifacts, details
+
+    async def _check_ssim(self, url: str) -> float:
+        """Run ffmpeg SSIM filter on 3 seconds of video.
+
+        Returns a 0‑1 score (higher = better).  Falls back to 0.5 on failure.
+        """
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-t", "3", "-i", url,
+                "-vf", "ssim", "-f", "null", "-",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except (OSError, asyncio.SubprocessError) as exc:
+            logger.warning("Failed to start ffmpeg SSIM for %s: %s", url, exc)
+            return 0.5
+
+        try:
+            _, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=self.config.probe_timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.debug("SSIM check timed out for %s", url)
+            return 0.5
+
+        stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
+        # Parse: "SSIM All:0.987654 (18.765432)"
+        for line in stderr_text.splitlines():
+            if "All:" in line:
+                try:
+                    ssim_str = line.split("All:")[1].strip().split()[0]
+                    return max(0.0, min(1.0, float(ssim_str)))
+                except (ValueError, IndexError):
+                    continue
+        return 0.5
+
+    async def _check_blocking(self, url: str) -> float:
+        """Extract one frame and run FFT‑based macroblock detection.
+
+        Returns a 0‑1 score (1 = no blocking, 0 = severe blocking).
+        Falls back to 0.5 on any error.
+        """
+        try:
+            from io import BytesIO
+            import numpy as np
+            from PIL import Image
+
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-i", url, "-vframes", "1",
+                "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "2", "-",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except (OSError, asyncio.SubprocessError) as exc:
+            logger.warning("Failed to start ffmpeg frame-grab for %s: %s", url, exc)
+            return 0.5
+
+        try:
+            stdout, _ = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=self.config.probe_timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.debug("Frame grab timed out for %s", url)
+            return 0.5
+
+        if not stdout:
+            return 0.5
+
+        try:
+            img = Image.open(BytesIO(stdout)).convert("L")
+            arr = np.array(img, dtype=np.float64)
+            h, w = arr.shape
+
+            # 2‑D FFT
+            fft = np.abs(np.fft.fft2(arr))
+            fft_shifted = np.fft.fftshift(fft)
+            total_energy = np.sum(fft_shifted ** 2)
+            if total_energy == 0:
+                return 0.5
+
+            # Energy at macroblock frequencies (multiples of 8 pixels)
+            cy, cx = h // 2, w // 2
+            grid_energy = 0.0
+            step = 8
+            for dy in range(-h // 2, h // 2, step):
+                for dx in range(-w // 2, w // 2, step):
+                    gy, gx = cy + dy, cx + dx
+                    if 0 <= gy < h and 0 <= gx < w:
+                        grid_energy += fft_shifted[gy, gx] ** 2
+
+            grid_ratio = grid_energy / total_energy
+            # Invert: 0% ratio → score 1.0, 30%+ ratio → score 0.0
+            score = max(0.0, 1.0 - grid_ratio / 0.3)
+            return min(1.0, score)
+
+        except Exception as e:
+            logger.warning("Blocking check failed for %s: %s", url, e)
+            return 0.5
 
     # ------------------------------------------------------------------
     # Silence detection  (deep / background only)

@@ -39,6 +39,7 @@ class ProbeResult:
     height: int                                 # 0 if resolution unknown
     stable: bool
     score: float                                # (width * height) * stability_ratio
+    avg_bitrate_bps: float = 0.0                # average bitrate from stability sample
     has_audio: bool = True                      # False if no audio stream detected
     error: Optional[str] = None
 
