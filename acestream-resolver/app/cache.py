@@ -7,7 +7,7 @@ Hard expiry: entries are never deleted (get_fallback works even after TTL).
 import time
 from typing import Optional
 
-from . import ResolvedChannel
+from models import ResolvedChannel
 
 
 class ResolverCache:

@@ -17,7 +17,8 @@ from pathlib import Path
 # Importar configuración
 from config import (
     APP_PORT, M3U_DIR, LOG_LEVEL, MAX_CONNECTIONS,
-    ACESTREAM_PROXY_HOST, ACESTREAM_PROXY_PORT
+    ACESTREAM_PROXY_HOST, ACESTREAM_PROXY_PORT,
+    RESOLVER_SERVICE_URL,
 )
 
 # Importar utilidades
@@ -29,8 +30,8 @@ from handlers.acestream import set_http_session as set_acestream_session
 from handlers.brightcove import set_http_session as set_brightcove_session
 from handlers.globalmest import set_http_session as set_globalmest_session
 
-# Importar Acestream Resolver
-from acestreamresolver import StreamResolver, ResolverConfig
+# Importar cliente HTTP del Acestream Resolver
+from resolver_client import ResolverClient
 
 # Configurar logging
 logger = setup_logging(LOG_LEVEL)
@@ -92,8 +93,8 @@ templates = setup_jinja_with_macros(M3U_DIR)
 # Variable global para la sesión HTTP
 http_session: Optional[ClientSession] = None
 
-# Instancia global del resolver de Acestream
-resolver_instance: Optional[StreamResolver] = None
+# Cliente HTTP para el Acestream Hash Resolver (servicio externo)
+resolver_client: Optional[ResolverClient] = None
 
 def print_available_playlists():
     """Imprime las URLs de acceso de todas las listas de reproducción disponibles"""
@@ -136,12 +137,8 @@ async def check_health() -> bool:
         return False
 
 async def shutdown():
-    global http_session, resolver_instance
+    global http_session, resolver_client
     logger.info("Iniciando apagado controlado...")
-
-    # Detener Acestream Resolver
-    if resolver_instance:
-        await resolver_instance.stop()
 
     # Cerrar sesión HTTP
     if http_session and not http_session.closed:
@@ -166,11 +163,9 @@ async def lifespan(app: FastAPI):
         timeout=ClientTimeout(total=30)
     )
     
-    # Inicializar Acestream Hash Resolver
-    global resolver_instance
-    resolver_config = ResolverConfig()
-    resolver_instance = StreamResolver(resolver_config)
-    await resolver_instance.start()
+    # Inicializar cliente HTTP del Acestream Hash Resolver
+    global resolver_client
+    resolver_client = ResolverClient(RESOLVER_SERVICE_URL, http_session)
     
     # Inyectar sesión en handlers que la necesitan
     set_acestream_session(http_session)
@@ -249,16 +244,17 @@ async def generate_m3u(request: Request, m3u_file: str):
         }
         args.update(params)
 
-        # Pre-resolver canales acestream si el resolver está activo
-        if resolver_instance:
+        # Pre-resolver canales acestream via HTTP al servicio externo
+        if resolver_client:
             raw = Path(M3U_DIR, f"{m3u_file}.m3u").read_text(encoding="utf-8")
             channel_names = list(set(
                 re.findall(r"acestream_resolve\(['\"](.+?)['\"]\)", raw)
             ))
-            resolved_channels = {
-                name: resolver_instance.lookup_from_cache(name)
-                for name in channel_names
-            }
+            try:
+                resolved_channels = await resolver_client.resolve(channel_names)
+            except Exception as e:
+                logger.warning(f"Error resolviendo canales: {e}")
+                resolved_channels = {}
             args["resolved_channels"] = resolved_channels
         else:
             resolved_channels = {}

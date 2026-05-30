@@ -19,8 +19,8 @@ import time
 
 import aiohttp
 
-from . import ProbeResult
-from .config import ResolverConfig
+from models import ProbeResult
+from config import ResolverConfig
 
 logger = logging.getLogger("LocalStreams.resolver.prober")
 
@@ -102,7 +102,7 @@ class StreamProber:
             to ``"connection failed"`` when the stream was unreachable and
             no resolution could be determined.
         """
-        url = f"http://127.0.0.1:{self.config.app_port}/acestream/video?id={hash}"
+        url = f"{self.config.localstreams_base_url}/acestream/video?id={hash}"
 
         # Run resolution+audio and stability checks concurrently.
         # Probing through localstreams' own proxy (not acexy directly) so
@@ -285,7 +285,7 @@ class StreamProber:
         check's score (0 = worst, 1 = best).  A stream is flagged for
         artifacts when the weighted composite falls below 0.5.
         """
-        url = f"http://127.0.0.1:{self.config.app_port}/acestream/video?id={hash}"
+        url = f"{self.config.localstreams_base_url}/acestream/video?id={hash}"
         pixels = width * height
 
         # 1. Bitrate vs. resolution (40% weight)

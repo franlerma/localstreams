@@ -59,7 +59,7 @@ USER localstreams
 WORKDIR /app
 
 # Copiar requirements y plugins
-COPY --chown=localstreams:localstreams app/requirements.txt /app/
+COPY --chown=localstreams:localstreams localstreams/app/requirements.txt /app/
 COPY --chown=localstreams:localstreams resources/plugins /home/localstreams/.local/share/streamlink/plugins
 
 # Instalar dependencias Python y Playwright (sin --with-deps porque ya instalamos las deps del sistema)
@@ -67,7 +67,7 @@ RUN pip install --user --no-cache-dir -r requirements.txt && \
     python -m playwright install chromium
 
 # Copiar código de aplicación
-COPY --chown=localstreams:localstreams app/ /app/
+COPY --chown=localstreams:localstreams localstreams/app/ /app/
 COPY --chown=localstreams:localstreams data/ /data/
 
 EXPOSE 15123

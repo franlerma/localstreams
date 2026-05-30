@@ -11,10 +11,10 @@ from typing import TYPE_CHECKING, Optional
 import aiohttp
 from aiohttp import ClientTimeout
 
-from . import AcestreamEntry
+from models import AcestreamEntry
 
 if TYPE_CHECKING:
-    from .config import ResolverConfig
+    from config import ResolverConfig
 
 logger = logging.getLogger("LocalStreams.resolver.source")
 

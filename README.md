@@ -22,36 +22,51 @@ LocalStreams is a FastAPI application designed to facilitate the generation and 
 
 ### Services
 
-The project consists of three main services:
+The project consists of four main services:
 
 - **localstreams**: Main FastAPI application (port 15123)
+- **acestream-resolver**: AceStream hash resolution microservice (port 15124)
 - **acexy**: AceStream proxy (port 8080)
 - **acestream**: AceStream HTTP engine (internal port 6878)
 
 ### Project Structure
 
 ```
-localstreams/
-├── app/
-│   ├── localstream.py          # Main FastAPI application
-│   ├── config.py               # Configuration and environment variables
-│   ├── handlers/               # Handlers for different endpoints
-│   │   ├── __init__.py
-│   │   ├── streamlink.py       # StreamLink streaming
-│   │   ├── acestream.py        # AceStream streaming
-│   │   ├── hls_mux.py          # HLS multiplexing (video+audio)
-│   │   └── brightcove.py       # Generic Brightcove extractor
-│   ├── utils/                  # Utilities
-│   │   ├── __init__.py
-│   │   └── logging.py          # Logging configuration
-│   └── requirements.txt        # Python dependencies
+localstreams/                    # Repository root
+├── localstreams/                # Main FastAPI application
+│   ├── app/
+│   │   ├── localstream.py       # Main FastAPI application
+│   │   ├── config.py            # Configuration and environment variables
+│   │   ├── resolver_client/     # HTTP client for acestream-resolver
+│   │   ├── handlers/            # Handlers for different endpoints
+│   │   │   ├── __init__.py
+│   │   │   ├── streamlink.py    # StreamLink streaming
+│   │   │   ├── acestream.py     # AceStream streaming
+│   │   │   ├── hls_mux.py       # HLS multiplexing (video+audio)
+│   │   │   └── brightcove.py    # Generic Brightcove extractor
+│   │   ├── utils/               # Utilities
+│   │   │   ├── __init__.py
+│   │   │   └── logging.py       # Logging configuration
+│   │   └── requirements.txt     # Python dependencies
+│   └── Dockerfile               # localstreams image
+├── acestream-resolver/          # AceStream hash resolver microservice
+│   ├── app/
+│   │   ├── main.py              # FastAPI HTTP API
+│   │   ├── config.py            # Resolver configuration
+│   │   ├── resolver.py          # Resolution orchestrator
+│   │   ├── cache.py             # In-memory TTL cache
+│   │   ├── source.py            # External M3U source manager
+│   │   ├── matcher.py           # Fuzzy channel name matcher
+│   │   ├── prober.py            # Stream resolution & stability prober
+│   │   └── requirements.txt     # Resolver Python dependencies
+│   └── Dockerfile               # Resolver image
 ├── data/
-│   └── m3u/                    # Example M3U templates
+│   └── m3u/                     # Example M3U templates
 ├── resources/
-│   └── plugins/                # Custom StreamLink plugins
-├── docker-compose.yml          # Multi-service configuration
-├── Dockerfile                  # Application image
-└── Makefile                    # Simplified commands
+│   └── plugins/                 # Custom StreamLink plugins
+├── docker-compose.yml           # Multi-service configuration
+├── Makefile                     # Simplified commands
+└── README.md                    # This file
 ```
 
 ## Installation ⚙️
@@ -87,11 +102,13 @@ localstreams/
    
    See the [M3U Template Example](#m3u-template-example) section below for detailed instructions on creating playlists.
 
-4. **Build the image:**
+4. **Build the images:**
    ```bash
-   make build
+   make build              # localstreams
+   make build-resolver     # acestream-resolver
    # Or directly with docker:
-   docker build -t franlerma/localstreams .
+   docker build -t franlerma/localstreams localstreams/
+   docker build -t franlerma/acestream-resolver acestream-resolver/
    ```
 
 5. **Start services:**
@@ -107,13 +124,16 @@ The project includes a Makefile to simplify common operations:
 
 ```bash
 make help              # Show help
-make build             # Build Docker image
-make up                # Start services
-make down              # Stop services
-make restart           # Restart services
-make logs              # View logs in real-time
+make build             # Build localstreams image
+make build-resolver    # Build acestream-resolver image
+make up                # Start all services
+make down              # Stop all services
+make restart           # Restart all services
+make logs              # View localstreams logs
+make logs-resolver     # View acestream-resolver logs
 make status            # View service status
-make shell             # Access container
+make shell             # Access localstreams container
+make shell-resolver    # Access acestream-resolver container
 make volumes-create    # Create volume directories
 make clean             # Docker cleanup
 make info              # System information
@@ -123,7 +143,7 @@ make info              # System information
 
 ### Main Environment Variables
 
-All environment variables are centralized in `app/config.py`:
+#### localstreams (`localstreams/app/config.py`)
 
 ```bash
 # FastAPI application port
@@ -143,6 +163,34 @@ STREAMLINK_CHUNKSIZE=131072
 APP_M3U_DIR=/data/m3u
 APP_LOG_LEVEL=INFO
 APP_MAX_CONNECTIONS=100
+
+# Acestream Hash Resolver (external service)
+RESOLVER_SERVICE_URL=http://acestream-resolver:15124
+```
+
+#### acestream-resolver (`acestream-resolver/app/config.py`)
+
+```bash
+# Resolver service port
+RESOLVER_PORT=15124
+
+# Base URL of the localstreams app (used for probing)
+LOCALSTREAMS_BASE_URL=http://localstreams:15123
+
+# External M3U sources (comma-separated)
+ACESTREAM_RESOLVER_SOURCES=https://...
+
+# Refresh interval in seconds (default: 1800)
+ACESTREAM_RESOLVER_REFRESH_INTERVAL=1800
+
+# Timeouts
+ACESTREAM_RESOLVER_DOWNLOAD_TIMEOUT=10
+ACESTREAM_RESOLVER_PROBE_TIMEOUT=20
+ACESTREAM_RESOLVER_TOTAL_TIMEOUT=30
+ACESTREAM_RESOLVER_STABILITY_SAMPLE=5
+
+# Resolution mode: 'probe' (ffprobe) or 'metadata' (heuristic)
+ACESTREAM_RESOLVER_RESOLUTION_MODE=probe
 ```
 
 ### Volume Structure
@@ -305,16 +353,20 @@ La macro `acestream_resolve()` permite buscar y resolver automáticamente el mej
 {{ acestream_resolve('Movistar LaLiga') }}
 ```
 
-**Configuración vía variables de entorno:**
+La resolución se delega al microservicio **acestream-resolver** (puerto 15124), que se ejecuta en su propio contenedor. La app principal realiza una llamada HTTP al resolver por cada renderizado de plantilla — latencia típica: ~1ms en Docker network local.
+
+**Configuración del resolver (variables de entorno):**
 - `ACESTREAM_RESOLVER_SOURCES` — URLs de listas M3U externas (separadas por coma)
 - `ACESTREAM_RESOLVER_REFRESH_INTERVAL` — Segundos entre refrescos de caché (default: 1800)
 - `ACESTREAM_RESOLVER_RESOLUTION_MODE` — `probe` (ffprobe) o `metadata` (tvg-attributes)
+- Ver todas las variables en la sección [Environment Variables](#acestream-resolver-acestream-resolverappconfigpy)
 
 **Comportamiento:**
 - Los canales se resuelven en paralelo antes de renderizar la plantilla
 - El sistema prueba múltiples candidatos y selecciona el de mayor resolución estable
-- Los resultados se cachean y refrescan periódicamente
+- Los resultados se cachean en el resolver y se refrescan periódicamente
 - Si ningún stream funciona, se devuelve el mejor candidato por metadatos
+- **Tolerancia a fallos**: si el resolver está caído, la plantilla se renderiza sin hashes (canales sin resolver)
 
 **Template variables available in macros:**
 - `{{scheme}}` - Protocol (http/https)

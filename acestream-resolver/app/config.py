@@ -48,6 +48,18 @@ class ResolverConfig:
     )
     """Resolution detection mode: 'probe' (ffprobe) or 'metadata' (tvg-attributes / name heuristic)."""
 
+    resolver_port: int = field(
+        default_factory=lambda: int(os.getenv("RESOLVER_PORT", "15124"))
+    )
+    """Port for the resolver's HTTP API."""
+
+    localstreams_base_url: str = field(
+        default_factory=lambda: os.getenv("LOCALSTREAMS_BASE_URL", "http://localstreams:15123")
+    )
+    """Base URL of the localstreams app. Used to probe streams through the
+    app's own proxy (with retry/patience logic) instead of directly
+    against AceXY."""
+
     acexy_host: str = field(
         default_factory=lambda: os.getenv("ACESTREAM_PROXY_HOST", "127.0.0.1")
     )
@@ -58,22 +70,10 @@ class ResolverConfig:
     )
     """AceXY port for stream probing."""
 
-    app_port: int = field(
-        default_factory=lambda: int(os.getenv("ACESTREAM_APP_PORT", "15123"))
-    )
-    """LocalStreams app port. Used to probe streams through our own proxy
-    instead of directly against AceXY, so the built-in retry/patience logic
-    gives cold engines time to find peers."""
-
-    m3u_dir: str = field(
-        default_factory=lambda: os.getenv("APP_M3U_DIR", "/data/m3u")
-    )
-    """Directory containing M3U template files."""
-
     cache_file: str = field(
         default_factory=lambda: os.getenv(
             "ACESTREAM_RESOLVER_CACHE_FILE",
-            "/data/m3u/.resolver_cache.yaml",
+            "/data/.resolver_cache.yaml",
         )
     )
     """Path to persistent cache YAML file (survives container restarts, human‑editable)."""

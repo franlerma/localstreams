@@ -1,4 +1,4 @@
-"""StreamResolver — orchestrator for the acestream-hash-resolver feature.
+"""StreamResolver — orchestrator for the acestream-hash-resolver service.
 
 Coordinates source fetching, fuzzy matching, stream probing, caching,
 and background cache refresh. This is the single public API entry point
@@ -11,7 +11,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -20,17 +19,16 @@ import yaml
 
 import aiohttp
 
-from . import AcestreamEntry, ProbeResult, ResolvedChannel
-from .cache import ResolverCache
-from .config import ResolverConfig
-from .matcher import ChannelMatcher
-from .prober import StreamProber
-from .source import M3USourceManager
+from models import AcestreamEntry, ProbeResult, ResolvedChannel
+from cache import ResolverCache
+from config import ResolverConfig
+from matcher import ChannelMatcher
+from prober import StreamProber
+from source import M3USourceManager
 
 logger = logging.getLogger("LocalStreams.resolver")
 
-RESOLVE_CALL_RE = re.compile(r"""acestream_resolve\(['"](.+?)['"]\)""")
-_TEMPLATE_POLL_INTERVAL = 30  # seconds between template file checks
+_REFRESH_INTERVAL = 60  # seconds between background refresh checks
 
 
 class StreamResolver:
@@ -49,9 +47,6 @@ class StreamResolver:
         self._cache = ResolverCache(ttl=config.refresh_interval)
         self._refresh_task: Optional[asyncio.Task[None]] = None
         self._stop_event = asyncio.Event()
-        # Template tracking for fast activation/deactivation
-        self._template_mtimes: dict[str, float] = {}
-        self._active_templates_known: Optional[bool] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -59,27 +54,26 @@ class StreamResolver:
 
     async def start(self) -> None:
         """Initialize the resolver: create HTTP session, warm up sources,
-        detect template usage, start background refresh loop."""
+        load persisted cache, start background refresh loop."""
         self._http = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=self.config.download_timeout),
         )
         self._source_manager = M3USourceManager(self.config, self._http)
         self._prober = StreamProber(self.config, self._http)
 
-        # Warm up: initial source download
-        try:
-            await self._source_manager.fetch_all()
-        except Exception as e:
-            logger.warning("Warmup source fetch failed: %s", e)
-
         # Load persisted cache from disk
         self._load_cache()
 
-        # Immediately resolve all channels from active templates
-        await self.pre_resolve_all()
-
-        # Persist any newly resolved entries
-        self._save_cache()
+        # Warm up source download so first on-demand resolve is fast
+        if self._source_manager:
+            try:
+                await self._source_manager.fetch_all()
+                logger.info(
+                    "Sources warmed up — %d URLs tracked",
+                    len(self._source_manager.get_all_source_urls()),
+                )
+            except Exception as e:
+                logger.warning("Initial source fetch failed: %s", e)
 
         # Start background refresh loop
         self._stop_event.clear()
@@ -103,76 +97,11 @@ class StreamResolver:
     def lookup_from_cache(self, name: str) -> str:
         """Synchronous cache-only lookup. Returns hash or ``""`` if not cached.
 
-        This is the **only** method called from the template rendering path.
+        This is the **only** method called from the request path.
         It never does I/O — instant return.
         """
         cached = self._cache.get(name)
         return cached.hash if cached else ""
-
-    async def pre_resolve_all(self) -> None:
-        """Scan all templates, collect all ``acestream_resolve`` names,
-        fetch sources, and resolve every uncached name.
-
-        Called from the background refresh loop only — never from the
-        request path.
-        """
-        m3u_dir = Path(self.config.m3u_dir)
-        if not m3u_dir.exists():
-            return
-
-        all_names: set[str] = set()
-        for f in m3u_dir.glob("*.m3u"):
-            try:
-                content = f.read_text(encoding="utf-8")
-                if "acestream_resolve" not in content:
-                    continue
-                names = RESOLVE_CALL_RE.findall(content)
-                for n in names:
-                    key = n.strip().lower()
-                    if key:
-                        all_names.add(key)
-            except Exception:
-                continue
-
-        if not all_names:
-            logger.debug("pre_resolve_all: no acestream_resolve calls found in templates")
-            return
-
-        missing = [n for n in all_names if self._cache.is_expired(n)]
-        if not missing:
-            logger.debug("pre_resolve_all: all %d names already cached", len(all_names))
-            return
-
-        logger.info(
-            "pre_resolve_all: resolving %d/%d uncached names",
-            len(missing),
-            len(all_names),
-        )
-
-        entries: list[AcestreamEntry] = []
-        if self._source_manager:
-            try:
-                entries = await self._source_manager.fetch_all()
-            except Exception as e:
-                logger.warning("pre_resolve_all: source fetch failed: %s", e)
-
-        if not entries:
-            logger.warning("pre_resolve_all: no source entries available")
-            return
-
-        resolved = await self._resolve_inner(missing, entries)
-        successful = sum(1 for v in resolved.values() if v)
-        logger.info(
-            "pre_resolve_all: resolved %d/%d names, now running silence check",
-            successful,
-            len(missing),
-        )
-
-        # Run silence checks in background
-        if resolved:
-            asyncio.create_task(self._refine_in_background(entries, resolved))
-
-        self._save_cache()
 
     async def resolve_batch(self, names: list[str]) -> dict[str, str]:
         """Resolve multiple channel names in parallel.
@@ -304,7 +233,6 @@ class StreamResolver:
             return {}
 
         # 2. Probe all unique candidate hashes in parallel
-        #    Use asyncio.wait for graceful partial-results on timeout.
         logger.info(
             "Probing %d unique hashes for %d names",
             len(all_candidate_hashes),
@@ -325,8 +253,6 @@ class StreamResolver:
                 timeout=self.config.total_timeout,
             )
         except (asyncio.TimeoutError, asyncio.CancelledError):
-            # Both running and completed tasks are captured below;
-            # treat everything still running as pending.
             done = {t for t in probe_tasks.keys() if t.done()}
             pending = {t for t in probe_tasks.keys() if not t.done()}
 
@@ -407,15 +333,10 @@ class StreamResolver:
         hash: str,
         name_to_candidates: dict[str, list[AcestreamEntry]],
     ) -> Optional[ProbeResult]:
-        """Probe a single hash, deriving metadata resolution from entry name heuristics.
-
-        Returns ``None`` when the prober is not available (should not
-        happen after ``start()``).
-        """
+        """Probe a single hash, deriving metadata resolution from entry name heuristics."""
         if self._prober is None:
             return None
 
-        # Derive metadata resolution from any candidate entry that has this hash
         metadata_resolution: tuple[int, int] = (0, 0)
         for candidates in name_to_candidates.values():
             for entry in candidates:
@@ -454,13 +375,10 @@ class StreamResolver:
         for entry in entries:
             pr = probe_results.get(entry.hash)
             if pr is not None and pr.error is None and pr.score > 0:
-                # Successful probe — use composite score (pixels * stability)
                 scored_probed.append((pr.score, entry.hash))
             elif pr is None:
-                # Never probed — use fuzzy match score as weak fallback
                 match_score = self._matcher.score(name, entry)
                 scored_fallback.append((match_score, entry.hash))
-            # else: pr is not None but errored or score=0 → candidate is DEAD, skip it
 
         if scored_probed:
             scored_probed.sort(key=lambda x: -x[0])
@@ -486,21 +404,19 @@ class StreamResolver:
         For each resolved name, runs ``check_silence()`` on the selected hash.
         If the stream is silent, probes the next best candidate and updates
         the cache.  The user never waits for this — results are available on
-        the next template render.
+        the next request.
         """
         for norm_name, current_hash in resolved.items():
             if not current_hash:
                 continue
 
-            # Silence check on the currently cached stream
-            url = f"http://127.0.0.1:{self.config.app_port}/acestream/video?id={current_hash}"
+            url = f"{self.config.localstreams_base_url}/acestream/video?id={current_hash}"
             is_silent, max_db = await self._prober.check_silence(url)
 
             swap_reason = None
             if is_silent:
                 swap_reason = f"SILENT (max_volume={max_db:.1f} dB)"
             else:
-                # Stream has audio — check visual quality
                 cached_entry = self._cache.get_fallback(norm_name)
                 width, height = 1280, 720
                 if cached_entry:
@@ -522,7 +438,7 @@ class StreamResolver:
                         "Background refine: '%s' OK (hash=%s… audio=OK visual=OK)",
                         norm_name, current_hash[:8],
                     )
-                    continue  # Stream is fine, nothing to do
+                    continue
 
             logger.warning(
                 "Background refine: '%s' (hash=%s…) %s — searching alternatives",
@@ -531,7 +447,6 @@ class StreamResolver:
                 swap_reason,
             )
 
-            # Find alternative candidates for this name
             candidates = self._matcher.find_matches(norm_name, entries)
             alt_candidates = [c for c in candidates if c.hash != current_hash]
 
@@ -542,7 +457,6 @@ class StreamResolver:
                 )
                 continue
 
-            # Probe the first alternative
             alt = alt_candidates[0]
             metadata_res = StreamProber._resolution_from_name(alt.name)
             pr = await self._prober.probe(
@@ -558,7 +472,6 @@ class StreamResolver:
                 )
                 continue
 
-            # Update cache with the working alternative
             resolution_str = (
                 f"{pr.width}x{pr.height}"
                 if pr.width and pr.height
@@ -580,72 +493,6 @@ class StreamResolver:
                 alt.hash[:8],
                 norm_name,
             )
-
-    # ------------------------------------------------------------------
-    # Template utilities
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def find_channel_names_in_template(template_path: str) -> list[str]:
-        """Read an M3U template and extract all ``acestream_resolve('...')`` channel names.
-
-        Returns deduplicated list (preserving first-occurrence order).
-        """
-        try:
-            content = Path(template_path).read_text(encoding="utf-8")
-        except (OSError, IOError) as e:
-            logger.warning("Cannot read template %s: %s", template_path, e)
-            return []
-
-        matches = RESOLVE_CALL_RE.findall(content)
-        # Deduplicate while preserving order
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for m in matches:
-            key = m.strip().lower()
-            if key not in seen:
-                seen.add(key)
-                deduped.append(m.strip())
-        return deduped
-
-    def _has_active_templates(self) -> bool:
-        """Scan ``M3U_DIR`` for ``.m3u`` files containing ``acestream_resolve``.
-
-        Returns ``True`` if at least one template uses the macro.
-        Also updates internal ``_template_mtimes`` for change detection.
-        """
-        m3u_dir = Path(self.config.m3u_dir)
-        if not m3u_dir.exists():
-            return False
-        found = False
-        for f in m3u_dir.glob("*.m3u"):
-            try:
-                stat = f.stat()
-                self._template_mtimes[f.name] = stat.st_mtime
-                content = f.read_text(encoding="utf-8")
-                if "acestream_resolve" in content:
-                    found = True
-            except Exception:
-                continue
-        return found
-
-    def _templates_changed_since_last_check(self) -> bool:
-        """Check if any template file was modified since last ``_has_active_templates()`` call.
-
-        Lightweight stat-only check (no content reading).
-        """
-        m3u_dir = Path(self.config.m3u_dir)
-        if not m3u_dir.exists():
-            return False
-        for f in m3u_dir.glob("*.m3u"):
-            try:
-                new_mtime = f.stat().st_mtime
-                old_mtime = self._template_mtimes.get(f.name)
-                if old_mtime is None or new_mtime > old_mtime:
-                    return True
-            except Exception:
-                continue
-        return False
 
     # ------------------------------------------------------------------
     # Cache persistence
@@ -727,55 +574,26 @@ class StreamResolver:
     async def _refresh_loop(self) -> None:
         """Periodic background refresh loop.
 
-        Polls template files every ``_TEMPLATE_POLL_INTERVAL`` seconds to
-        detect when templates start or stop using ``acestream_resolve``.
-        Only downloads sources and re-probes when active templates exist.
-        Full source refresh happens at most once per ``refresh_interval``.
-
-        When templates transition from inactive to active, the first
-        refresh is triggered immediately.
+        Re-fetches sources and re-probes all cached channels at most once
+        per ``refresh_interval``.  Pure periodic — no template file scanning.
         """
-        time_since_refresh = 0  # start() already ran pre_resolve_all()
-        was_active = False
+        time_since_refresh = 0
         while not self._stop_event.is_set():
             try:
-                # Quick check: if templates changed, re-evaluate active state
-                if self._templates_changed_since_last_check():
-                    logger.info("Template files changed — re-evaluating active state")
-                    self._active_templates_known = None
-                    # Trigger re-resolution on next cycle (new channels may have been added)
-                    time_since_refresh = self.config.refresh_interval
-
-                # Lazy-evaluate active state (cached between template changes)
-                if self._active_templates_known is None:
-                    self._active_templates_known = self._has_active_templates()
-
-                # Trigger refresh immediately when templates become active
-                if self._active_templates_known and not was_active:
-                    logger.info("Templates now use acestream_resolve — starting background refresh")
-
-                was_active = bool(self._active_templates_known)
-
-                if self._active_templates_known:
-                    # Full refresh only at configured interval
-                    if time_since_refresh >= self.config.refresh_interval:
-                        time_since_refresh = 0
-                        await self.pre_resolve_all()
-
+                if time_since_refresh >= self.config.refresh_interval:
+                    time_since_refresh = 0
+                    await self._refresh_cache()
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error("Refresh loop error: %s", e)
 
-            await asyncio.sleep(_TEMPLATE_POLL_INTERVAL)
-            time_since_refresh += _TEMPLATE_POLL_INTERVAL
+            await asyncio.sleep(_REFRESH_INTERVAL)
+            time_since_refresh += _REFRESH_INTERVAL
 
     async def _refresh_cache(self) -> None:
         """Re-fetch sources.  If changed, re-probe all cached channels
         and auto-upgrade if better candidates appear.
-
-        Uses ``fetch_all`` directly (which handles conditional requests
-        internally) to avoid double-download.
         """
         source_manager = self._source_manager
         if not source_manager:
@@ -791,26 +609,33 @@ class StreamResolver:
             logger.debug("Refresh: no source changes detected")
             return
 
-        logger.info("Source changed — re-probing cached channels")
+        logger.info("Source changed — resolving all names from sources")
 
-        # Get all cached channel names (including expired — upgrade them too)
-        cached_names = self._cache.get_all_names()
-        if not cached_names:
-            logger.debug("Refresh: no cached channels to re-probe")
+        # Collect ALL unique names from source entries (including new ones)
+        all_source_names = list({
+            e.name.strip().lower() for e in entries if e.name and e.name.strip()
+        })
+
+        if not all_source_names:
+            logger.debug("Refresh: no names found in source entries")
             return
 
-        # Re-resolve with fresh entries.
-        # _resolve_inner updates the cache for successful re-resolutions.
-        # Names that fail keep their old cached entries (not evicted).
-        resolved = await self._resolve_inner(cached_names, entries)
+        # Only resolve names that are expired or not yet cached
+        names_to_resolve = [n for n in all_source_names if self._cache.is_expired(n)]
+
+        if not names_to_resolve:
+            logger.debug("Refresh: all %d names already fresh", len(all_source_names))
+            return
+
+        resolved = await self._resolve_inner(names_to_resolve, entries)
         successful = sum(1 for v in resolved.values() if v)
         logger.info(
-            "Cache refresh: %d/%d channels re-resolved",
+            "Cache refresh: %d/%d channels resolved (cache has %d total)",
             successful,
-            len(cached_names),
+            len(names_to_resolve),
+            len(all_source_names),
         )
 
-        # Also run silence checks in background (fire-and-forget)
         if resolved:
             asyncio.create_task(self._refine_in_background(entries, resolved))
 
@@ -818,11 +643,6 @@ class StreamResolver:
         """Quick check: download sources with ETag/If-Modified-Since.
 
         Returns ``True`` if any source has new content.
-
-        Note: this method mutates ``_source_state`` inside the source
-        manager (on 200 responses), so subsequent calls to ``fetch_all``
-        will see 304.  It is primarily useful for external monitoring;
-        internal refresh uses ``fetch_all`` directly.
         """
         source_manager = self._source_manager
         if not source_manager:
@@ -835,7 +655,6 @@ class StreamResolver:
         async def check_one(url: str) -> bool:
             try:
                 content, _ = await source_manager.download_source(url)
-                # content is None on 304 (no change), not-None on 200 (changed)
                 return content is not None
             except Exception:
                 return False

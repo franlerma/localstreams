@@ -14,7 +14,7 @@ import re
 
 from rapidfuzz import fuzz, utils as fuzz_utils
 
-from . import AcestreamEntry
+from models import AcestreamEntry
 
 logger = logging.getLogger("LocalStreams.resolver.matcher")
 

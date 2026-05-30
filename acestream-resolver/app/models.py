@@ -1,9 +1,4 @@
-"""Acestream Hash Resolver — isolated package for resolving AceStream hashes by channel name.
-
-This package has zero imports from the rest of LocalStreams. It communicates
-with the app only through StreamResolver.start()/stop() lifecycle and the
-resolve_batch() -> dict[str, str] interface.
-"""
+"""Data models for the AceStream Hash Resolver."""
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -42,23 +37,3 @@ class ProbeResult:
     avg_bitrate_bps: float = 0.0                # average bitrate from stability sample
     has_audio: bool = True                      # False if no audio stream detected
     error: Optional[str] = None
-
-
-from .config import ResolverConfig
-from .source import M3USourceManager
-from .matcher import ChannelMatcher
-from .prober import StreamProber
-from .cache import ResolverCache
-from .resolver import StreamResolver
-
-__all__ = [
-    "AcestreamEntry",
-    "ResolvedChannel",
-    "ProbeResult",
-    "ResolverConfig",
-    "M3USourceManager",
-    "ChannelMatcher",
-    "StreamProber",
-    "ResolverCache",
-    "StreamResolver",
-]

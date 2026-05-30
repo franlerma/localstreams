@@ -1,5 +1,8 @@
 x-localstreams-base: &localstreams-base
   image: franlerma/localstreams
+  build:
+    context: .
+    dockerfile: localstreams/Dockerfile
   container_name: localstreams
   ports:
     - "15123:15123"
@@ -13,6 +16,7 @@ x-localstreams-base: &localstreams-base
     - ACESTREAM_POLL_TIME=0
     - ACESTRAM_RETRY_TOTAL=10
     - APP_LOG_LEVEL=DEBUG
+    - RESOLVER_SERVICE_URL=http://acestream-resolver:15124
   labels:
     - com.centurylinklabs.watchtower.enable=false
     - wud.watch=false
@@ -65,9 +69,9 @@ services:
     profiles: [ 'regular' ]
     environment:
       - ACESTREAM_PROXY_HOST=acexy-regular
-      - ACESTREAM_RESOLVER_SOURCES=https://ipfs.io/ipns/k51qzi5uqu5di462t7j4vu4akwfhvtjhy88qbupktvoacqfqe9uforjvhyi4wr/hashes.m3u,https://ipfs.io/ipns/k2k4r8lm8tkmuxbc8lkmq1in3v0oya1p6pe9o5bu0hu30br5ko08k2gb/data/listas/lista_fuera_iptv.m3u
     depends_on:
       - acexy-regular
+      - acestream-resolver
 
   localstreams-vpn:
     <<: *localstreams-base
@@ -78,6 +82,7 @@ services:
       - acexy-vpn
       - acestream-vpn
       - gluetun
+      - acestream-resolver
 
   localstreams-docker-proxy:
     image: tecnativa/docker-socket-proxy
@@ -94,6 +99,22 @@ services:
     networks:
       - localstreams-network
     restart: unless-stopped
+
+  acestream-resolver:
+    image: franlerma/acestream-resolver
+    build:
+      context: ./acestream-resolver
+    container_name: acestream-resolver
+    ports:
+      - "15124:15124"
+    environment:
+      - ACESTREAM_RESOLVER_SOURCES=https://ipfs.io/ipns/k51qzi5uqu5di462t7j4vu4akwfhvtjhy88qbupktvoacqfqe9uforjvhyi4wr/hashes.m3u,https://ipfs.io/ipns/k2k4r8lm8tkmuxbc8lkmq1in3v0oya1p6pe9o5bu0hu30br5ko08k2gb/data/listas/lista_fuera_iptv.m3u
+      - ACESTREAM_RESOLVER_REFRESH_INTERVAL=1800
+      - LOCALSTREAMS_BASE_URL=http://localstreams:15123
+      - RESOLVER_PORT=15124
+    networks:
+      - localstreams-network
+    restart: always
 
   acexy-regular:
     <<: *acexy-base
