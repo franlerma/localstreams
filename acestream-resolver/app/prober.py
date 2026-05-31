@@ -102,11 +102,11 @@ class StreamProber:
             to ``"connection failed"`` when the stream was unreachable and
             no resolution could be determined.
         """
-        url = f"{self.config.localstreams_base_url}/acestream/video?id={hash}"
+        url = f"{self.config.acexy_base}/ace/getstream?id={hash}"
 
         # Run resolution+audio and stability checks concurrently.
-        # Probing through localstreams' own proxy (not acexy directly) so
-        # the built-in retry/patience logic gives cold engines time to start.
+        # Probing directly against the dedicated acexy-resolver so resolver
+        # probes don't contend with real user streams on the main acexy.
         (width, height, has_audio), (stability_ratio, stable, avg_bitrate_bps) = await asyncio.gather(
             self._probe_resolution(url),
             self._measure_stability(url),
@@ -285,7 +285,7 @@ class StreamProber:
         check's score (0 = worst, 1 = best).  A stream is flagged for
         artifacts when the weighted composite falls below 0.5.
         """
-        url = f"{self.config.localstreams_base_url}/acestream/video?id={hash}"
+        url = f"{self.config.acexy_base}/ace/getstream?id={hash}"
         pixels = width * height
 
         # 1. Bitrate vs. resolution (40% weight)
@@ -501,10 +501,10 @@ class StreamProber:
         """
         if re.search(r"(?i)\b4K\b", name):
             return 3840, 2160
-        if re.search(r"(?i)\bFHD\b", name) or re.search(r"(?i)\b1080\b", name):
+        if re.search(r"(?i)\bFHD\b", name) or re.search(r"(?i)\b1080", name):
             return 1920, 1080
-        if re.search(r"(?i)\bHD\b", name) or re.search(r"(?i)\b720\b", name):
+        if re.search(r"(?i)\bHD\b", name) or re.search(r"(?i)\b720", name):
             return 1280, 720
-        if re.search(r"(?i)\bSD\b", name) or re.search(r"(?i)\b480\b", name):
+        if re.search(r"(?i)\bSD\b", name) or re.search(r"(?i)\b480", name):
             return 854, 480
         return 1280, 720

@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import signal
+import traceback
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -247,11 +248,30 @@ async def generate_m3u(request: Request, m3u_file: str):
         # Pre-resolver canales acestream via HTTP al servicio externo
         if resolver_client:
             raw = Path(M3U_DIR, f"{m3u_file}.m3u").read_text(encoding="utf-8")
-            channel_names = list(set(
-                re.findall(r"acestream_resolve\(['\"](.+?)['\"]\)", raw)
-            ))
+            # Extract ALL string arguments grouped by acestream_resolve() call
+            groups: list[list[str]] = []
+            all_names: list[str] = []
+            for match in re.finditer(r"acestream_resolve\(([^)]+)\)", raw):
+                raw_args = re.findall(r"""['"]([^'"]*)['"]""", match.group(1))
+                clean = [n.strip() for n in raw_args if n.strip()]
+                if clean:
+                    groups.append(clean)
+                    all_names.extend(clean)
+            all_names = list(set(all_names))
+
             try:
-                resolved_channels = await resolver_client.resolve(channel_names)
+                resolved = await resolver_client.resolve(all_names)
+                # Propagate: within each group, give all names the same best hash
+                if isinstance(resolved, dict):
+                    for group in groups:
+                        best = next((resolved[n] for n in group if resolved.get(n)), "")
+                        if best:
+                            for name in group:
+                                resolved[name] = best
+                    resolved_channels = resolved
+                else:
+                    logger.warning(f"Resolver returned unexpected type: {type(resolved)}")
+                    resolved_channels = {}
             except Exception as e:
                 logger.warning(f"Error resolviendo canales: {e}")
                 resolved_channels = {}
@@ -275,6 +295,7 @@ async def generate_m3u(request: Request, m3u_file: str):
 
     except Exception as e:
         logger.error(f"Error generando M3U: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(404, "Archivo M3U no encontrado")
 
 @app.get("/check_health")

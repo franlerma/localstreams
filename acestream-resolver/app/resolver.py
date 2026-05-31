@@ -47,6 +47,12 @@ class StreamResolver:
         self._cache = ResolverCache(ttl=config.refresh_interval)
         self._refresh_task: Optional[asyncio.Task[None]] = None
         self._stop_event = asyncio.Event()
+        # Cached source entries for instant name-only resolution (no I/O)
+        self._entries: list[AcestreamEntry] = []
+        # Limit concurrent probes to avoid flooding acexy
+        self._probe_semaphore = asyncio.Semaphore(2)
+        # Track failed hashes so they get deprioritized on re-check
+        self._failed_hashes: dict[str, float] = {}  # hash -> time() when failed
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -67,9 +73,12 @@ class StreamResolver:
         # Warm up source download so first on-demand resolve is fast
         if self._source_manager:
             try:
-                await self._source_manager.fetch_all()
+                entries = await self._source_manager.fetch_all()
+                if entries:
+                    self._entries = entries
                 logger.info(
-                    "Sources warmed up — %d URLs tracked",
+                    "Sources warmed up — %d entries from %d URLs",
+                    len(self._entries),
                     len(self._source_manager.get_all_source_urls()),
                 )
             except Exception as e:
@@ -102,6 +111,330 @@ class StreamResolver:
         """
         cached = self._cache.get(name)
         return cached.hash if cached else ""
+
+    def _source_priority(self, source_url: Optional[str]) -> int:
+        """Return priority index for a source URL (lower = better, 0 = best).
+        Returns ``len(source_urls)`` for unknown sources.
+        """
+        if not source_url:
+            return len(self.config.source_urls)
+        for i, url in enumerate(self.config.source_urls):
+            if url in source_url or source_url in url:
+                return i
+        return len(self.config.source_urls)
+
+    async def resolve_by_name_only(self, names: list[str]) -> dict[str, str]:
+        """Resolve names using only fuzzy matching against source entries.
+
+        **No probing** — returns the best match by name similarity instantly.
+        Results are cached so subsequent ``lookup_from_cache()`` calls hit.
+        Background refresh will probe and refine quality.
+        """
+        if not self._entries:
+            logger.warning("No source entries available for name resolution")
+            return {name: "" for name in names}
+
+        results = {}
+        for name in names:
+            norm_name = name.strip().lower()
+            candidates = self._matcher.find_matches(norm_name, self._entries)
+            if candidates:
+                # Score by name + source priority + resolution
+                scored_candidates = []
+                for c in candidates:
+                    s = self._matcher.score(norm_name, c)
+                    sp = self._source_priority(c.source_url)
+                    # Source boost: first source strongly preferred
+                    source_boost = {0: 30, 1: 5}.get(sp, 0)
+                    # Penalize hashes that failed recently
+                    fail_time = self._failed_hashes.get(c.hash)
+                    if fail_time and (time.time() - fail_time) < self.config.refresh_interval:
+                        s -= 100
+                    w, h = StreamProber._resolution_from_name(c.name)
+                    pixels = w * h if w and h else 0
+                    scored_candidates.append((s, sp, source_boost, pixels, c))
+
+                # Sort: best name score → source boost → highest resolution
+                scored_candidates.sort(key=lambda x: (-x[0], -x[2], -x[3]))
+                best = scored_candidates[0][4]
+                results[name] = best.hash
+
+                # Log all candidates
+                for i, (s, sp, boost, px, c) in enumerate(scored_candidates[:5]):
+                    w, h = StreamProber._resolution_from_name(c.name)
+                    res_str = f"{w}x{h}" if w and h else "?"
+                    src = c.source_url.split("/")[-1] if c.source_url else "?"
+                    tag = " ← SELECTED" if c == best else ""
+                    logger.info(
+                        "  Candidate %d: '%s' → %s (name='%s', score=%d, res=%s, source=%s)%s",
+                        i + 1,
+                        name,
+                        c.hash[:8],
+                        c.name,
+                        s,
+                        res_str,
+                        src,
+                        tag,
+                    )
+                if len(scored_candidates) > 5:
+                    logger.info("  ... and %d more candidates", len(scored_candidates) - 5)
+
+                # Cache so later lookups are instant
+                channel = ResolvedChannel(
+                    channel_name=norm_name,
+                    hash=best.hash,
+                    resolution=best.tvg_resolution or "unknown",
+                    score=0.5,  # tentative — updated by background probe
+                    cached_at=time.time(),
+                    expires_at=time.time() + self.config.refresh_interval,
+                )
+                self._cache.set(norm_name, channel)
+            else:
+                results[name] = ""
+
+        matched = sum(1 for v in results.values() if v)
+        logger.info(
+            "Name-only resolve: %d/%d matched (0 probes)",
+            matched,
+            len(names),
+        )
+        return results
+
+    async def resolve_with_probe(self, names: list[str]) -> dict[str, str]:
+        """Resolve names: fuzzy match + quick probe of top candidate.
+
+        Probes the best name+resolution candidate. If it responds, uses it.
+        If not, falls back to the next candidate. If all fail, keeps the
+        best name match as fallback (better than nothing).
+        """
+        if not self._entries:
+            return {name: "" for name in names}
+        if self._prober is None:
+            return await self.resolve_by_name_only(names)
+
+        results = {}
+        for name in names:
+            norm_name = name.strip().lower()
+            candidates = self._matcher.find_matches(norm_name, self._entries)
+            if not candidates:
+                results[name] = ""
+                continue
+
+            # Score by name + source priority + resolution
+            scored = []
+            for c in candidates:
+                s = self._matcher.score(norm_name, c)
+                sp = self._source_priority(c.source_url)
+                source_boost = {0: 30, 1: 5}.get(sp, 0)
+                w, h = StreamProber._resolution_from_name(c.name)
+                pixels = w * h if w and h else 0
+                scored.append((s, sp, source_boost, pixels, c))
+            scored.sort(key=lambda x: (-x[0], -x[2], -x[3]))
+
+            # Log all candidates
+            logger.info("  Probing candidates for '%s':", name)
+            for i, (s, sp, boost, px, c) in enumerate(scored[:5]):
+                w, h = StreamProber._resolution_from_name(c.name)
+                res_str = f"{w}x{h}" if w and h else "?"
+                src = c.source_url.split("/")[-1] if c.source_url else "?"
+                logger.info(
+                    "    Candidate %d: %s (name='%s', score=%d, src_prio=%d, res=%s, source=%s)",
+                    i + 1, c.hash[:8], c.name, s, sp, res_str, src,
+                )
+
+            # Quick-probe top candidates until one works (semaphore limits concurrency)
+            selected = None
+            probed_hashes = set()
+            for s, sp, boost, px, c in scored:
+                if c.hash in probed_hashes:
+                    continue
+                probed_hashes.add(c.hash)
+                try:
+                    async with self._probe_semaphore:
+                        pr = await asyncio.wait_for(
+                            self._prober.probe(
+                                hash=c.hash,
+                                resolution_mode=self.config.resolution_mode,
+                            ),
+                            timeout=min(self.config.probe_timeout, 8),
+                        )
+                    if pr is not None and pr.error is None and pr.score > 0:
+                        # Verify bitrate is reasonable for this resolution
+                        if pr.width > 0 and pr.height > 0:
+                            pixels = pr.width * pr.height
+                            min_bps = (pixels / (1920 * 1080)) * 500_000
+                            if pr.avg_bitrate_bps < min_bps:
+                                logger.info(
+                                    "    ❌ %s low bitrate (%.0f bps < %.0f) — trying next",
+                                    c.hash[:8], pr.avg_bitrate_bps, min_bps,
+                                )
+                                continue
+                        selected = c
+                        res_str = f"{pr.width}x{pr.height}" if pr.width and pr.height else "?"
+                        logger.info(
+                            "    ✅ %s works! (res=%s, bitrate=%.0f, score=%.0f)",
+                            c.hash[:8], res_str, pr.avg_bitrate_bps, pr.score,
+                        )
+                        # Cache with real probe data
+                        channel = ResolvedChannel(
+                            channel_name=norm_name,
+                            hash=c.hash,
+                            resolution=res_str,
+                            score=pr.score,
+                            cached_at=time.time(),
+                            expires_at=time.time() + self.config.refresh_interval,
+                        )
+                        self._cache.set(norm_name, channel)
+                        break
+                except (asyncio.TimeoutError, Exception) as e:
+                    err_type = type(e).__name__
+                    err_msg = str(e) or "(no message)"
+                    logger.info("    ❌ %s failed [%s]: %s", c.hash[:8], err_type, err_msg)
+
+            if selected is None:
+                # Fallback: best name match (unverified)
+                fallback = scored[0][4]
+                logger.warning(
+                    "    No working stream for '%s' — using unverified %s",
+                    name, fallback.hash[:8],
+                )
+                results[name] = fallback.hash
+                channel = ResolvedChannel(
+                    channel_name=norm_name,
+                    hash=fallback.hash,
+                    resolution="unknown",
+                    score=0.5,
+                    cached_at=time.time(),
+                    expires_at=time.time() + self.config.refresh_interval,
+                )
+                self._cache.set(norm_name, channel)
+            else:
+                results[name] = selected.hash
+
+        matched = sum(1 for v in results.values() if v)
+        logger.info("Resolve with probe: %d/%d verified", matched, len(names))
+        return results
+
+    async def probe_and_refine(
+        self,
+        names: list[str],
+        name_only_results: dict[str, str],
+    ) -> None:
+        """Background probe to verify and refine name-only resolution.
+
+        Called as a fire-and-forget task after returning the instant
+        name-only result.  Probes the selected hash for each name.
+        If it fails, tries alternative candidates from source entries.
+        Updates the cache if a better candidate is found.
+        """
+        if not self._entries or not self._prober:
+            return
+
+        logger.info("Background probe: verifying %d resolved name(s)", len(name_only_results))
+
+        probed_hashes: set[str] = set()
+
+        for name in names:
+            norm_name = name.strip().lower()
+            current_hash = name_only_results.get(name, "")
+            if not current_hash:
+                continue
+            if current_hash in probed_hashes:
+                logger.debug("  Background: %s already probed (synonym), skipping", current_hash[:8])
+                continue
+            probed_hashes.add(current_hash)
+
+            # Quick probe of the current hash (8s timeout, semaphore limits concurrency)
+            try:
+                async with self._probe_semaphore:
+                    pr = await asyncio.wait_for(
+                        self._prober.probe(
+                            hash=current_hash,
+                            resolution_mode=self.config.resolution_mode,
+                        ),
+                        timeout=min(self.config.probe_timeout, 8),
+                    )
+                if pr is not None and pr.error is None and pr.score > 0:
+                    logger.info(
+                        "  ✅ Background: %s verified (res=%dx%d, score=%.0f)",
+                        current_hash[:8], pr.width, pr.height, pr.score,
+                    )
+                    # Cache with verified score
+                    self._cache.set(norm_name, ResolvedChannel(
+                        channel_name=norm_name,
+                        hash=current_hash,
+                        resolution=f"{pr.width}x{pr.height}" if pr.width and pr.height else "unknown",
+                        score=pr.score,
+                        cached_at=time.time(),
+                        expires_at=time.time() + self.config.refresh_interval,
+                    ))
+                else:
+                    logger.info("  ❌ Background: %s failed probe — checking alternatives", current_hash[:8])
+                    self._failed_hashes[current_hash] = time.time()
+                    await self._try_alternatives(norm_name)
+            except (asyncio.TimeoutError, Exception) as e:
+                err_type = type(e).__name__
+                err_msg = str(e) or "(no message)"
+                logger.info(
+                    "  ❌ Background: %s probe error [%s]: %s — checking alternatives",
+                    current_hash[:8], err_type, err_msg,
+                )
+                self._failed_hashes[current_hash] = time.time()
+                await self._try_alternatives(norm_name)
+
+    async def _try_alternatives(self, norm_name: str) -> None:
+        """Try alternative candidates when the primary hash fails probing."""
+        if not self._entries or not self._prober:
+            return
+        candidates = self._matcher.find_matches(norm_name, self._entries)
+        if not candidates:
+            return
+        # Score by name + source + resolution
+        scored = []
+        for c in candidates:
+            s = self._matcher.score(norm_name, c)
+            sp = self._source_priority(c.source_url)
+            source_boost = max(0, (len(self.config.source_urls) - sp) * 5 - 5)
+            fail_time = self._failed_hashes.get(c.hash)
+            if fail_time and (time.time() - fail_time) < self.config.refresh_interval:
+                s -= 100
+            w, h = StreamProber._resolution_from_name(c.name)
+            scored.append((s, sp, source_boost, w * h if w and h else 0, c))
+        scored.sort(key=lambda x: (-x[0], -x[2], -x[3]))
+
+        # Probe alternatives until one works
+        for s, sp, boost, px, alt in scored:
+            if self._cache.get(norm_name) and self._cache.get(norm_name).hash == alt.hash:
+                continue  # already cached and verified
+            try:
+                async with self._probe_semaphore:
+                    pr = await asyncio.wait_for(
+                        self._prober.probe(
+                            hash=alt.hash,
+                            resolution_mode=self.config.resolution_mode,
+                        ),
+                        timeout=min(self.config.probe_timeout, 8),
+                    )
+                if pr is not None and pr.error is None and pr.score > 0:
+                    logger.info(
+                        "  ✅ Background: alternative %s works! Upgrading '%s'",
+                        alt.hash[:8], norm_name,
+                    )
+                    self._cache.set(norm_name, ResolvedChannel(
+                        channel_name=norm_name,
+                        hash=alt.hash,
+                        resolution=f"{pr.width}x{pr.height}" if pr.width and pr.height else "unknown",
+                        score=pr.score,
+                        cached_at=time.time(),
+                        expires_at=time.time() + self.config.refresh_interval,
+                    ))
+                    return
+                else:
+                    self._failed_hashes[alt.hash] = time.time()
+            except (asyncio.TimeoutError, Exception):
+                self._failed_hashes[alt.hash] = time.time()
+                continue
+        logger.warning("  Background: no working alternative for '%s'", norm_name)
 
     async def resolve_batch(self, names: list[str]) -> dict[str, str]:
         """Resolve multiple channel names in parallel.
@@ -348,11 +681,12 @@ class StreamResolver:
             if metadata_resolution != (0, 0):
                 break
 
-        return await self._prober.probe(
-            hash=hash,
-            resolution_mode=self.config.resolution_mode,
-            metadata_resolution=metadata_resolution,
-        )
+        async with self._probe_semaphore:
+            return await self._prober.probe(
+                hash=hash,
+                resolution_mode=self.config.resolution_mode,
+                metadata_resolution=metadata_resolution,
+            )
 
     def _pick_best_hash(
         self,
@@ -382,12 +716,27 @@ class StreamResolver:
 
         if scored_probed:
             scored_probed.sort(key=lambda x: -x[0])
-            return scored_probed[0][1]
+            winner = scored_probed[0]
+            if len(scored_probed) > 1:
+                logger.info(
+                    "  Pick for '%s': probed winner %s… (score=%.0f), runner-up %s… (score=%.0f)",
+                    name,
+                    winner[1][:8], winner[0],
+                    scored_probed[1][1][:8], scored_probed[1][0],
+                )
+            return winner[1]
 
         if scored_fallback:
             scored_fallback.sort(key=lambda x: -x[0])
-            return scored_fallback[0][1]
+            winner = scored_fallback[0]
+            logger.info(
+                "  Pick for '%s': no probes available, using name-match %s… (score=%d)",
+                name,
+                winner[1][:8], winner[0],
+            )
+            return winner[1]
 
+        logger.warning("  Pick for '%s': no viable candidate from %d entries", name, len(entries))
         return None
 
     # ------------------------------------------------------------------
@@ -410,7 +759,7 @@ class StreamResolver:
             if not current_hash:
                 continue
 
-            url = f"{self.config.localstreams_base_url}/acestream/video?id={current_hash}"
+            url = f"{self.config.acexy_base}/ace/getstream?id={current_hash}"
             is_silent, max_db = await self._prober.check_silence(url)
 
             swap_reason = None
@@ -608,6 +957,9 @@ class StreamResolver:
         if not entries:
             logger.debug("Refresh: no source changes detected")
             return
+
+        # Update cached entries for name-only resolution
+        self._entries = entries
 
         logger.info("Source changed — resolving all names from sources")
 

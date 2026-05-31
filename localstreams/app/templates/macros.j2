@@ -16,5 +16,9 @@
 {%- endmacro %}
 
 {% macro acestream_resolve(name) -%}
-{{scheme}}://{{hostname}}:{{port}}/acestream/video?id={{ resolved_channels.get(name, '') }}
+{% set ns = namespace(result=resolved_channels.get(name, '')) -%}
+{% for alt in varargs | default([]) -%}
+{% if not ns.result %}{% set ns.result = resolved_channels.get(alt, '') %}{% endif -%}
+{%- endfor -%}
+{{scheme}}://{{hostname}}:{{port}}/acestream/video?id={{ ns.result }}
 {%- endmacro %}

@@ -97,7 +97,7 @@ class ChannelMatcher:
 
             if score < effective:
                 if score > 40:
-                    logger.warning(
+                    logger.debug(
                         "Unmatched: query='%s' vs entry='%s' tvg='%s' tvg_id='%s' — score=%d threshold=%d",
                         normalized_query,
                         self._normalize(entry.name),

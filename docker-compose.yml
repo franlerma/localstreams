@@ -71,7 +71,6 @@ services:
       - ACESTREAM_PROXY_HOST=acexy-regular
     depends_on:
       - acexy-regular
-      - acestream-resolver
 
   localstreams-vpn:
     <<: *localstreams-base
@@ -82,7 +81,6 @@ services:
       - acexy-vpn
       - acestream-vpn
       - gluetun
-      - acestream-resolver
 
   localstreams-docker-proxy:
     image: tecnativa/docker-socket-proxy
@@ -112,9 +110,46 @@ services:
       - ACESTREAM_RESOLVER_REFRESH_INTERVAL=1800
       - LOCALSTREAMS_BASE_URL=http://localstreams:15123
       - RESOLVER_PORT=15124
+      - ACESTREAM_PROXY_HOST=acexy-resolver
+      - ACESTREAM_PROXY_PORT=8080
+    depends_on:
+      acexy-resolver:
+        condition: service_healthy
     networks:
       - localstreams-network
     restart: always
+
+  acexy-resolver:
+    image: franlerma/acexy:latest
+    container_name: acexy-resolver
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -t1 -O- http://127.0.0.1:8080/ace/status > /dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    environment:
+      ACEXY_LISTEN_ADDR: ":8080"
+      ACEXY_SCHEME: "http"
+      ACEXY_M3U8_STREAM_TIMEOUT: "60s"
+      ACEXY_M3U8: "false"
+      ACEXY_EMPTY_TIMEOUT: "20s"
+      ACEXY_BUFFER_SIZE: "4MB"
+      ACEXY_NO_RESPONSE_TIMEOUT: "10s"
+      ACEXY_LOG_LEVEL: "INFO"
+      ACESTREAM_MIN_REPLICAS: "1"
+      ACESTREAM_MAX_REPLICAS: "3"
+      ACESTREAM_STREAMS_PER_INSTANCE: "3"
+      ACESTREAM_IDLE_TIMEOUT: "5s"
+      ACESTREAM_RECYCLE_TIMEOUT: "15s"
+      ACESTREAM_IMAGE: "blaiseio/acelink:latest"
+      DOCKER_HOST: "tcp://localstreams-docker-proxy:2375"
+    depends_on:
+      localstreams-docker-proxy:
+        condition: service_started
+    networks:
+      - localstreams-network
 
   acexy-regular:
     <<: *acexy-base

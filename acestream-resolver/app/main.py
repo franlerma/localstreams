@@ -11,7 +11,12 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, Query
+from pydantic import BaseModel
 from fastapi.responses import JSONResponse
+
+
+class ResolveRequest(BaseModel):
+    names: list[str]
 
 from config import ResolverConfig
 from resolver import StreamResolver
@@ -54,9 +59,9 @@ async def lifespan(app: FastAPI):
     await resolver_instance.start()
 
     logger.info(
-        "Acestream Resolver started on port %d, probing via %s",
+        "Acestream Resolver started on port %d, probing via acexy at %s",
         config.resolver_port,
-        config.localstreams_base_url,
+        config.acexy_base,
     )
 
     yield
@@ -102,29 +107,47 @@ async def resolve(names: str = Query(..., description="Comma-separated list of c
 
     cached_count = sum(1 for v in results.values() if v)
 
-    # Lazy resolution: resolve names not in cache
+    # Name-only: fuzzy match for INSTANT result (no probing)
     if cached_count < len(name_list):
         missing = [n for n in name_list if not results[n]]
         logger.info(
-            "Cache miss for %d name(s) — resolving on demand",
+            "Cache miss for %d name(s) — name-only resolve (probe in background)",
             len(missing),
         )
         try:
-            resolved = await resolver_instance.resolve_batch(missing)
+            resolved = await resolver_instance.resolve_by_name_only(missing)
             results.update(resolved)
+
+            # Fire-and-forget: probe the resolved hashes in background
+            # to refine quality without blocking the response
+            asyncio.create_task(
+                resolver_instance.probe_and_refine(missing, resolved)
+            )
         except Exception as e:
-            logger.warning("On-demand resolution failed: %s", e)
+            logger.warning("Name resolution failed: %s", e)
 
     resolved_count = sum(1 for v in results.values() if v)
     for name, h in results.items():
         if h:
             logger.info("  => %s → %s", name, h[:8])
     logger.info(
-        "Resolve response: %d/%d resolved",
+        "Resolve response: %d/%d resolved (instant, no probe)",
         resolved_count,
         len(name_list),
     )
     return JSONResponse({"results": results})
+
+
+@app.post("/api/v1/resolve")
+async def resolve_post(body: ResolveRequest):
+    """Resolve channel names via POST (JSON body).
+
+    Same logic as GET but accepts ``{"names": ["name1", "name2"]}``.
+    Preferred over GET for cleaner handling of special characters.
+    """
+    # Delegate to GET handler
+    names_str = ",".join(body.names)
+    return await resolve(names=names_str)
 
 
 if __name__ == "__main__":

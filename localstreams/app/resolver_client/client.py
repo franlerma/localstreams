@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from typing import Optional
-from urllib.parse import quote
 
 import aiohttp
 from aiohttp import ClientSession
@@ -14,8 +13,8 @@ logger = logging.getLogger("LocalStreams.resolver_client")
 class ResolverClient:
     """Async HTTP client for the acestream-resolver microservice.
 
-    Makes HTTP GET requests to the resolver's ``/api/v1/resolve`` endpoint
-    and returns cached hash results as a ``{name: hash}`` dict.
+    Sends channel names via POST JSON to the resolver's ``/api/v1/resolve``
+    endpoint and returns cached hash results as a ``{name: hash}`` dict.
     """
 
     def __init__(self, base_url: str, http_session: ClientSession) -> None:
@@ -25,12 +24,11 @@ class ResolverClient:
     async def resolve(self, names: list[str]) -> dict[str, str]:
         """Resolve channel names via the resolver service.
 
-        Makes a single HTTP GET with all names as a comma-separated query
-        parameter.  Returns ``{name: hash}`` where unresolved names have
-        an empty hash.
+        POST JSON ``{"names": [...]}`` to the resolver.
+        Returns ``{name: hash}`` where unresolved names have an empty hash.
 
-        On any failure (connection error, timeout, non-200), logs a warning
-        and returns an empty dict — templates still render without hashes.
+        On any failure, logs a warning and returns an empty dict —
+        templates still render without hashes.
         """
         if not names:
             return {}
@@ -44,14 +42,11 @@ class ResolverClient:
                 seen.add(key)
                 unique_names.append(n.strip())
 
-        # URL-encode each name individually so +, spaces, commas are safe
-        encoded_names = ",".join(quote(n, safe="") for n in unique_names)
-        url = f"{self._base_url}/api/v1/resolve?names={encoded_names}"
-
+        url = f"{self._base_url}/api/v1/resolve"
         timeout = aiohttp.ClientTimeout(total=5)
 
         try:
-            async with self._http.get(url, timeout=timeout) as resp:
+            async with self._http.post(url, json={"names": unique_names}, timeout=timeout) as resp:
                 if resp.status != 200:
                     logger.warning(
                         "Resolver returned HTTP %d for %d names",
