@@ -86,8 +86,9 @@ services:
       <<: *localstreams-env
       ACESTREAM_PROXY_HOST: "acexy-vpn"
     depends_on:
-      - acexy-vpn
-      - warp
+      acexy-vpn:
+        condition: service_healthy
+      # warp queda cubierto transitivamente a través de acexy-vpn
 
   localstreams-docker-proxy:
     image: tecnativa/docker-socket-proxy
@@ -119,7 +120,10 @@ services:
     links:
       - warp
     depends_on:
-      - warp
+      warp:
+        condition: service_healthy
+        # service_healthy: espera a que warp confirme VPN conectada
+        # (healthcheck de warp = curl cloudflare.com verifica warp=on)
 
   warp:
     image: caomingjun/warp
