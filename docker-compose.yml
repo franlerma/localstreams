@@ -41,6 +41,8 @@ x-acexy-base: &acexy-base
       ACEXY_NO_RESPONSE_TIMEOUT: "3s"
       ACEXY_LOG_LEVEL: "INFO"
 
+      ACEXY_ACESTREAM_DNS_SERVERS : "1.1.1.1,1.0.0.1"
+
       # Orchestrator config
       ACESTREAM_MIN_REPLICAS: "1"
       ACESTREAM_MAX_REPLICAS: "5"
@@ -75,7 +77,6 @@ services:
       - ACESTREAM_PROXY_HOST=acexy-vpn
     depends_on:
       - acexy-vpn
-      - acestream-vpn
       - gluetun
 
   localstreams-docker-proxy:
