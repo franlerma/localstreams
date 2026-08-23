@@ -1,3 +1,9 @@
+x-localstreams-env: &localstreams-env
+  ACESTREAM_PROXY_PORT: "8080"
+  ACESTREAM_POLL_TIME: "0"
+  ACESTRAM_RETRY_TOTAL: "10"
+  APP_LOG_LEVEL: "DEBUG"
+
 x-localstreams-base: &localstreams-base
   image: franlerma/localstreams
   container_name: localstreams
@@ -9,10 +15,7 @@ x-localstreams-base: &localstreams-base
     - /opt/docker/volumes/localstreams/picon:/data/picon
     - /opt/docker/volumes/localstreams/tmp:/tmp/acestream-cache
   environment:
-    - ACESTREAM_PROXY_PORT=8080
-    - ACESTREAM_POLL_TIME=0
-    - ACESTRAM_RETRY_TOTAL=10
-    - APP_LOG_LEVEL=DEBUG
+    <<: *localstreams-env
   labels:
     - com.centurylinklabs.watchtower.enable=false
     - wud.watch=false
@@ -25,35 +28,41 @@ x-localstreams-base: &localstreams-base
   networks:
     - localstreams-network
 
+x-acexy-env: &acexy-env
+  # Acexy core config
+  ACEXY_LISTEN_ADDR: ":8080"
+  ACEXY_SCHEME: "http"
+  ACEXY_M3U8_STREAM_TIMEOUT: "60s"
+  ACEXY_M3U8: "false"
+  ACEXY_EMPTY_TIMEOUT: "20s"
+  ACEXY_BUFFER_SIZE: "4MB"
+  ACEXY_NO_RESPONSE_TIMEOUT: "3s"
+  ACEXY_LOG_LEVEL: "INFO"
+
+  ACEXY_ACESTREAM_DNS_SERVERS: "1.1.1.1,1.0.0.1"
+
+  # Orchestrator config
+  ACESTREAM_MIN_REPLICAS: "1"
+  ACESTREAM_MAX_REPLICAS: "5"
+  ACESTREAM_STREAMS_PER_INSTANCE: "3"
+  ACESTREAM_IDLE_TIMEOUT: "5s"
+  ACESTREAM_RECYCLE_TIMEOUT: "15s"
+  ACESTREAM_IMAGE: "wafy80/acestream:latest"
+
+  # VPN routing: empty = regular bridge mode. acexy-vpn overrides this to
+  # route all AceStream traffic through the "warp" container's namespace.
+  ACESTREAM_VPN_CONTAINER: ""
+
+  # Docker socket proxy
+  DOCKER_HOST: "tcp://localstreams-docker-proxy:2375"
+
 x-acexy-base: &acexy-base
   image: franlerma/acexy:latest
   restart: always
   ports:
     - 8080:8080/tcp
   environment:
-    # Acexy core config
-      ACEXY_LISTEN_ADDR: ":8080"
-      ACEXY_SCHEME: "http"
-      ACEXY_M3U8_STREAM_TIMEOUT: "60s"
-      ACEXY_M3U8: "false"
-      ACEXY_EMPTY_TIMEOUT: "20s"
-      ACEXY_BUFFER_SIZE: "4MB"
-      ACEXY_NO_RESPONSE_TIMEOUT: "3s"
-      ACEXY_LOG_LEVEL: "INFO"
-
-      ACEXY_ACESTREAM_DNS_SERVERS : "1.1.1.1,1.0.0.1"
-
-      # Orchestrator config
-      ACESTREAM_MIN_REPLICAS: "1"
-      ACESTREAM_MAX_REPLICAS: "5"
-      ACESTREAM_STREAMS_PER_INSTANCE: "3"
-      ACESTREAM_IDLE_TIMEOUT: "5s"
-      ACESTREAM_RECYCLE_TIMEOUT: "15s"
-      ACESTREAM_IMAGE: "wafy80/acestream:latest"
-      COMPOSE_PROFILE: "regular"
-
-      # Docker socket proxy
-      DOCKER_HOST: "tcp://localstreams-docker-proxy:2375"
+    <<: *acexy-env
   depends_on:
       localstreams-docker-proxy:
         condition: service_started
@@ -74,10 +83,11 @@ services:
     <<: *localstreams-base
     profiles: [ 'vpn' ]
     environment:
-      - ACESTREAM_PROXY_HOST=acexy-vpn
+      <<: *localstreams-env
+      ACESTREAM_PROXY_HOST: "acexy-vpn"
     depends_on:
       - acexy-vpn
-      - gluetun
+      - warp
 
   localstreams-docker-proxy:
     image: tecnativa/docker-socket-proxy
@@ -103,39 +113,51 @@ services:
   acexy-vpn:
     <<: *acexy-base
     profiles: [ 'vpn' ]
+    environment:
+      <<: *acexy-env
+      ACESTREAM_VPN_CONTAINER: "warp"
     links:
-      - gluetun
+      - warp
     depends_on:
-      - gluetun
+      - warp
 
-  gluetun:
-    image: qmcgaw/gluetun
-    profiles: [ 'vpn']
+  warp:
+    image: caomingjun/warp
+    container_name: warp
     restart: always
+    profiles: [ 'vpn' ]
+    # add removed rule back (https://github.com/opencontainers/runc/pull/3468)
+    device_cgroup_rules:
+      - 'c 10:200 rwm'
+    ports:
+      - "1080:1080"
+    environment:
+      - WARP_SLEEP=2
+      # - WARP_LICENSE_KEY= # optional
+      # WARP_ENABLE_NAT: enables NAT so AceStream containers sharing the warp
+      # network namespace can route their traffic out through the tunnel.
+      - WARP_ENABLE_NAT=1
     cap_add:
+      # Docker already have them, these are for podman users
+      - MKNOD
+      - AUDIT_WRITE
+      # additional required cap for warp, both for podman and docker
       - NET_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
     sysctls:
       - net.ipv6.conf.all.disable_ipv6=0
       - net.ipv4.conf.all.src_valid_mark=1
-    ports:
-      - "8888:8888/tcp"
-      - "1080:1080"
-      - "8621:8621"
-      - "6881-6889:6881-6889"
+      # NAT required for acexy namespace sharing: forward routed traffic
+      - net.ipv4.ip_forward=1
+      # - net.ipv6.conf.all.forwarding=1
+      # - net.ipv6.conf.all.accept_ra=2
+    volumes:
+      - warp-data:/var/lib/cloudflare-warp
     networks:
       - localstreams-network
-    environment:
-      - HTTPPROXY=on
-      - VPN_SERVICE_PROVIDER=custom
-      - VPN_TYPE=wireguard
-      - VPN_ENDPOINT_IP=162.159.192.1
-      - VPN_ENDPOINT_PORT=2408
-      - WIREGUARD_PUBLIC_KEY=bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=
-      - WIREGUARD_PRIVATE_KEY=6AdkYWQn9rhnIDlaXH1GSjmcCR5B3RWxSBO6QWz0uEQ=
-      - WIREGUARD_ADDRESSES=172.16.0.2/32
 
 networks:
   localstreams-network:
     driver: bridge
+
+volumes:
+  warp-data:
