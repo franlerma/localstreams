@@ -47,11 +47,13 @@ x-acexy-env: &acexy-env
   ACESTREAM_STREAMS_PER_INSTANCE: "3"
   ACESTREAM_IDLE_TIMEOUT: "5s"
   ACESTREAM_RECYCLE_TIMEOUT: "15s"
-  ACESTREAM_IMAGE: "wafy80/acestream:latest"
+  ACESTREAM_IMAGE: "franlerma/acestream-vpn-switch:latest"
 
-  # VPN routing: empty = regular bridge mode. acexy-vpn overrides this to
-  # route all AceStream traffic through the "warp" container's namespace.
+  # VPN routing: empty = regular bridge mode (no VPN). acexy-vpn overrides this
+  # to route the bootstrap traffic through the "warp" container and, after
+  # ACESTREAM_VPN_SWITCH_AFTER, switch back to the normal network.
   ACESTREAM_VPN_CONTAINER: ""
+  ACESTREAM_VPN_SWITCH_AFTER: "45s"
 
   # Docker socket proxy
   DOCKER_HOST: "tcp://localstreams-docker-proxy:2375"
