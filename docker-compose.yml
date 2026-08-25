@@ -61,8 +61,6 @@ x-acexy-env: &acexy-env
 x-acexy-base: &acexy-base
   image: franlerma/acexy:latest
   restart: always
-  ports:
-    - 8080:8080/tcp
   environment:
     <<: *acexy-env
   depends_on:
