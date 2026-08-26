@@ -38,7 +38,9 @@ clean-images: down ## Borrar imágenes locales de acexy y acestream-vpn-switch (
 
 # Docker Compose
 up: volumes-create build ## Levantar los servicios con docker compose (perfil por defecto: vpn)
-	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} up -d
+	docker pull franlerma/acexy:latest
+	docker pull franlerma/acestream-vpn-switch:latest
+	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} up -d --force-recreate
 
 down: volumes-clean ## Detener y eliminar los servicios
 	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} down
