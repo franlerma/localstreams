@@ -24,13 +24,17 @@ clean-old-images: ## Limpiar imágenes viejas de localstreams
 	@docker rmi $(docker images $(IMAGE_NAME) -q) 2>/dev/null || echo "No hay imágenes viejas que limpiar"
 	@echo "Limpieza completada"
 
-clean-images: ## Borrar imágenes locales de acexy y acestream-vpn-switch
-	@echo "Borrando imágenes locales de acexy y acestream-vpn-switch..."
+clean-images: ## Borrar forzosamente imágenes locales de acexy y acestream-vpn-switch (elimina también los contenedores que las usan)
+	@echo "Borrando forzosamente imágenes de acexy y acestream-vpn-switch..."
 	@for img in franlerma/acexy franlerma/acestream-vpn-switch; do \
 		ids=$$(docker images $$img -q 2>/dev/null); \
 		if [ -n "$$ids" ]; then \
-			echo "Eliminando $$img ($$(echo $$ids | wc -w | tr -d ' ') imagen/es)"; \
-			docker rmi -f $$ids 2>/dev/null || echo "  (algunas en uso, no se pudieron borrar)"; \
+			containers=$$(docker ps -a --filter ancestor=$$img -q 2>/dev/null); \
+			if [ -n "$$containers" ]; then \
+				echo "Eliminando contenedores que usan $$img: $$(echo $$containers | wc -w | tr -d ' ')"; \
+				docker rm -f $$containers 2>/dev/null || true; \
+			fi; \
+			docker rmi -f $$ids 2>/dev/null && echo "Imagen eliminada: $$img"; \
 		else \
 			echo "$$img: no hay imágenes locales"; \
 		fi; \
