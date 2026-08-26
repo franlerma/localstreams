@@ -50,8 +50,8 @@ x-acexy-env: &acexy-env
   ACESTREAM_IMAGE: "franlerma/acestream-vpn-switch:latest"
 
   # VPN routing: empty = regular bridge mode (no VPN). acexy-vpn overrides this
-  # to route the bootstrap traffic through the "warp" container and, after
-  # ACESTREAM_VPN_SWITCH_AFTER, switch back to the normal network.
+  # to route traffic through the "warp" container. ACESTREAM_VPN_SWITCH_AFTER:
+  # 0 = stay on VPN permanently, >0 = switch back to normal after N seconds.
   ACESTREAM_VPN_CONTAINER: ""
   ACESTREAM_VPN_SWITCH_AFTER: "45s"
 
@@ -117,6 +117,8 @@ services:
     environment:
       <<: *acexy-env
       ACESTREAM_VPN_CONTAINER: "warp"
+      # VPN permanente: 0 = nunca vuelve a la red normal
+      ACESTREAM_VPN_SWITCH_AFTER: "0s"
     links:
       - warp
     depends_on:
