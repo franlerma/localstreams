@@ -127,6 +127,21 @@ services:
         # service_healthy: espera a que warp confirme VPN conectada
         # (healthcheck de warp = curl cloudflare.com verifica warp=on)
 
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    environment:
+      # Solo muestra contenedores de stacks compose (todos los del proyecto).
+      DOZZLE_FILTER: "label=com.docker.compose.project"
+    ports:
+      - "8081:8080"
+    volumes:
+      # Acceso read-only al socket para leer logs/eventos de los contenedores.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - localstreams-network
+
   warp:
     image: caomingjun/warp
     container_name: warp
