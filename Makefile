@@ -1,5 +1,5 @@
 # Makefile para localstreams
-.PHONY: help build up down restart logs status clean volumes-create volumes-clean shell clean-old-images
+.PHONY: help build up down restart logs status clean volumes-create volumes-clean shell clean-old-images clean-images
 
 # Variables
 MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -22,6 +22,19 @@ clean-old-images: ## Limpiar imágenes viejas de localstreams
 	@echo "Limpiando imágenes viejas de $(IMAGE_NAME)..."
 	@docker images $(IMAGE_NAME) --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}" || true
 	@docker rmi $(docker images $(IMAGE_NAME) -q) 2>/dev/null || echo "No hay imágenes viejas que limpiar"
+	@echo "Limpieza completada"
+
+clean-images: ## Borrar imágenes locales de acexy y acestream-vpn-switch
+	@echo "Borrando imágenes locales de acexy y acestream-vpn-switch..."
+	@for img in franlerma/acexy franlerma/acestream-vpn-switch; do \
+		ids=$$(docker images $$img -q 2>/dev/null); \
+		if [ -n "$$ids" ]; then \
+			echo "Eliminando $$img ($$(echo $$ids | wc -w | tr -d ' ') imagen/es)"; \
+			docker rmi -f $$ids 2>/dev/null || echo "  (algunas en uso, no se pudieron borrar)"; \
+		else \
+			echo "$$img: no hay imágenes locales"; \
+		fi; \
+	done
 	@echo "Limpieza completada"
 
 # Docker Compose
