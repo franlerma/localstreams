@@ -47,7 +47,8 @@ x-acexy-env: &acexy-env
   ACESTREAM_STREAMS_PER_INSTANCE: "3"
   ACESTREAM_IDLE_TIMEOUT: "5s"
   ACESTREAM_RECYCLE_TIMEOUT: "15s"
-  ACESTREAM_IMAGE: "franlerma/acestream-vpn-switch:latest"
+  # ACESTREAM_IMAGE usa por defecto franlerma/acestream-vpn-switch (default en
+  # el código de acexy). Sin override manual.
 
   # VPN routing: empty = regular bridge mode (no VPN). acexy-vpn overrides this
   # to route traffic through the "warp" container. ACESTREAM_VPN_SWITCH_AFTER:
