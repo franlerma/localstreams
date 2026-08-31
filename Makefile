@@ -45,7 +45,7 @@ up: volumes-create build ## Levantar los servicios con docker compose (perfil po
 down: volumes-clean ## Detener y eliminar los servicios
 	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} down
 	@echo "Limpiando instancias AceStream huérfanas..."
-	@docker ps -aq --filter "label=com.docker.compose.service=acestream" --filter "name=acestream-" | xargs -r docker rm -f 2>/dev/null || true
+	@docker ps -aq --filter "label=com.docker.compose.project=localstreams" --filter "name=acestream-" | xargs -r docker rm -f 2>/dev/null || true
 
 restart: down up ## Reiniciar los servicios (down + up)
 
