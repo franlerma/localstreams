@@ -236,10 +236,11 @@ async def generate_m3u(request: Request, m3u_file: str):
         template = templates.get_template(f"{m3u_file}.m3u")
         rendered_content = template.render(args)
         
-        # Filtrar líneas que empiezan con # pero no con #EXT
+        # Filtrar líneas que empiezan con # pero no con #EXT, y eliminar líneas en blanco
         filtered_lines = [
             line for line in rendered_content.split('\n')
-            if not (line.startswith('#') and not line.startswith('#EXT'))
+            if line.strip()
+            and not (line.startswith('#') and not line.startswith('#EXT'))
         ]
         filtered_content = '\n'.join(filtered_lines)
         
