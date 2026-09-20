@@ -39,7 +39,7 @@ x-acexy-env: &acexy-env
   ACEXY_NO_RESPONSE_TIMEOUT: "3s"
   ACEXY_LOG_LEVEL: "INFO"
 
-  ACEXY_ACESTREAM_DNS_SERVERS: "1.1.1.1,1.0.0.1"
+  ACEXY_ACESTREAM_DNS_SERVERS: "85.208.114.52,1.0.0.1"
 
   # Orchestrator config
   ACESTREAM_MIN_REPLICAS: "1"
@@ -159,6 +159,9 @@ services:
       # WARP_ENABLE_NAT: enables NAT so AceStream containers sharing the warp
       # network namespace can route their traffic out through the tunnel.
       - WARP_ENABLE_NAT=1
+    dns:
+      - 85.208.114.52
+      - 1.0.0.1
     cap_add:
       # Docker already have them, these are for podman users
       - MKNOD
