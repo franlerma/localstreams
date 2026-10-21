@@ -37,7 +37,12 @@ clean-images: down ## Borrar imágenes locales de acexy y acestream-vpn-switch (
 	@echo "Limpieza completada"
 
 # Docker Compose
-up: volumes-create build ## Levantar los servicios con docker compose (perfil por defecto: vpn)
+buildup: volumes-create build ## Levantar los servicios con docker compose (perfil por defecto: vpn)
+	docker pull franlerma/acexy:latest
+	docker pull franlerma/acestream-vpn-switch:latest
+	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} up -d --force-recreate
+
+up: volumes-create ## Levantar los servicios con docker compose (perfil por defecto: vpn)
 	docker pull franlerma/acexy:latest
 	docker pull franlerma/acestream-vpn-switch:latest
 	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} up -d --force-recreate
@@ -47,7 +52,9 @@ down: volumes-clean ## Detener y eliminar los servicios
 	@echo "Limpiando instancias AceStream huérfanas..."
 	@docker ps -aq --filter "label=com.docker.compose.project=localstreams" --filter "name=acestream-" | xargs -r docker rm -f 2>/dev/null || true
 
-restart: down up ## Reiniciar los servicios (down + up)
+restart: down buildup ## Reiniciar los servicios (down + up)
+
+reset: down up ## Reiniciar los servicios sin reconstruir(down + up)
 
 # Logs y monitoreo
 logs: ## Ver logs del servicio
