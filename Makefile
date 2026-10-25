@@ -6,7 +6,7 @@ MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 COMPOSE_FILE = $(MAKEFILE_DIR)docker-compose.yml
 SERVICE_NAME = localstreams
 IMAGE_NAME = franlerma/localstreams
-PROFILE = vpn
+PROFILE = vpn-mullvad
 
 # Ayuda por defecto
 help: ## Mostrar esta ayuda
@@ -78,6 +78,7 @@ volumes-create: ## Crear directorios de volúmenes
 	@echo "Creando directorios de volúmenes si no existen..."
 	sudo mkdir -p /opt/docker/volumes/localstreams/m3u
 	sudo mkdir -p /opt/docker/volumes/localstreams/picon
+	sudo mkdir -p /opt/docker/volumes/localstreams/mullvad
 	sudo mkdir -p /opt/docker/volumes/localstreams/tmp/acestream
 	sudo chmod 777 /opt/docker/volumes/localstreams/tmp/*
 	@echo "Directorios creados en /opt/docker/volumes/localstreams/"

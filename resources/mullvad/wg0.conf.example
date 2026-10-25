@@ -1,0 +1,22 @@
+# Plantilla para el perfil vpn-mullvad. NO pongas aqui la clave real.
+#
+# 1. Genera la config en https://mullvad.net/en/account/wireguard-config
+#    (WireGuard, elige pais/servidor y, si tu ISP filtra UDP, un puerto
+#    alternativo como 53 o 443).
+# 2. Copia el resultado a:
+#      /opt/docker/volumes/localstreams/mullvad/wg0.conf
+# 3. En ese fichero real:
+#      - quita la linea "DNS = ..." (el gateway no necesita resolver nada)
+#      - anade las dos lineas PostUp/PreDown de abajo en [Interface]
+#      - cambia "AllowedIPs" a 0.0.0.0/0 (sin ::/0, el stack es IPv4)
+#
+[Interface]
+PrivateKey = <TU_CLAVE_PRIVADA>
+Address = <10.x.x.x/32>
+PostUp = iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE; iptables -A FORWARD -i eth0 -o wg0 -j ACCEPT; iptables -A FORWARD -i wg0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+PreDown = iptables -t nat -D POSTROUTING -o wg0 -j MASQUERADE; iptables -D FORWARD -i eth0 -o wg0 -j ACCEPT; iptables -D FORWARD -i wg0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+[Peer]
+PublicKey = <CLAVE_PUBLICA_DEL_SERVIDOR>
+AllowedIPs = 0.0.0.0/0
+Endpoint = <IP_DEL_SERVIDOR>:<PUERTO>

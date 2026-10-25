@@ -157,5 +157,6 @@ ace-test
 .DS_Store
 test.py
 acestream-armv7-master
+wg0.conf
 data/m3u/*
 !data/m3u/test.m3u
