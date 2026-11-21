@@ -47,8 +47,12 @@ x-acexy-env: &acexy-env
   ACESTREAM_STREAMS_PER_INSTANCE: "3"
   ACESTREAM_IDLE_TIMEOUT: "5s"
   ACESTREAM_RECYCLE_TIMEOUT: "15s"
-  # ACESTREAM_IMAGE usa por defecto franlerma/acestream-vpn-switch (default en
-  # el código de acexy). Sin override manual.
+  ACESTREAM_IMAGE: franlerma/outpace-vpn-switch:latest
+  # Outpace usa "outpace serve" (no los flags del engine de AceStream) y solo
+  # expone /webui/api/service (healthcheck de acexy) con OUTPACE_ACE_COMPAT=1.
+  # ACESTREAM_ENGINE_ENV admite varias variables separadas por comas.
+  ACESTREAM_ENGINE_ARGS: "serve"
+  ACESTREAM_ENGINE_ENV: "OUTPACE_ACE_COMPAT=1"
 
   # VPN routing: empty = regular bridge mode (no VPN). acexy-vpn overrides this
   # to route traffic through the "warp" container. ACESTREAM_VPN_SWITCH_AFTER:
@@ -173,6 +177,8 @@ services:
       - TZ=Europe/Madrid
     volumes:
       - /opt/docker/volumes/localstreams/mullvad:/config/wg_confs
+      # Aplica el MASQUERADE por wg0 al arrancar (necesario para actuar de gateway)
+      - ./resources/mullvad/10-nat.sh:/custom-cont-init.d/10-nat.sh:ro
     healthcheck:
       # Sano solo si el handshake existe y la salida es realmente Mullvad
       test: ["CMD-SHELL", "wget -q -T5 -O- https://ipv4.am.i.mullvad.net/connected | grep -q 'You are connected to Mullvad'"]
