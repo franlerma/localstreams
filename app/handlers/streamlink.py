@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import shutil
 import logging
 from datetime import datetime
@@ -8,6 +9,9 @@ from config import STREAMLINK_BINARY, STREAMLINK_CHUNKSIZE
 
 router = APIRouter()
 logger = logging.getLogger("LocalStreams.streamlink")
+
+# Solo se conserva el final de stderr: un stream largo no debe acumular memoria
+STDERR_TAIL_BYTES = 8192
 
 @router.get("/streamlink/video")
 async def stream_video(request: Request):
@@ -55,34 +59,74 @@ async def stream_video(request: Request):
         logger.error(f"Error al iniciar streamlink: {str(e)}")
         raise HTTPException(500, f"Error al iniciar streamlink: {str(e)}")
 
-    async def stream_generator():
-        error_output = ""
-        chunks_sent = 0
-        
-        try:
-            # Leer stderr en paralelo para capturar errores
-            async def read_stderr():
-                nonlocal error_output
-                try:
-                    stderr_data = await proc.stderr.read()
-                    if stderr_data:
-                        error_output = stderr_data.decode('utf-8', errors='ignore')
-                        logger.warning(f"Streamlink stderr: {error_output}")
-                except Exception as e:
-                    logger.error(f"Error leyendo stderr: {str(e)}")
+    error_output = ""
 
-            # Iniciar lectura de stderr en background
-            stderr_task = asyncio.create_task(read_stderr())
-            
-            # Esperar un poco para que streamlink se inicialice
-            await asyncio.sleep(2)
-            
-            # Verificar si el proceso sigue vivo
-            if proc.returncode is not None:
-                await stderr_task
-                logger.error(f"Streamlink terminó prematuramente con código: {proc.returncode}")
-                logger.error(f"Error output: {error_output}")
-                raise HTTPException(500, f"Streamlink falló: {error_output}")
+    # Leer stderr en paralelo para capturar errores (solo se guarda el final)
+    async def read_stderr():
+        nonlocal error_output
+        tail = b""
+        try:
+            while True:
+                data = await proc.stderr.read(4096)
+                if not data:
+                    break
+                tail = (tail + data)[-STDERR_TAIL_BYTES:]
+        except Exception as e:
+            logger.error(f"Error leyendo stderr: {str(e)}")
+        if tail:
+            error_output = tail.decode('utf-8', errors='ignore')
+            logger.warning(f"Streamlink stderr: {error_output}")
+
+    async def terminate_process():
+        if proc.returncode is None:
+            try:
+                logger.info("Terminando proceso streamlink...")
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Forzando terminación de streamlink...")
+                    proc.kill()
+                    await proc.wait()
+            except ProcessLookupError:
+                pass
+            except Exception as e:
+                logger.error(f"Error terminando proceso: {str(e)}")
+
+    stderr_task = asyncio.create_task(read_stderr())
+
+    async def cleanup():
+        await terminate_process()
+        # Dejar que stderr termine de leerse; si no acaba, wait_for cancela la tarea
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(stderr_task, timeout=5.0)
+
+    # Leer el primer chunk antes de responder: el tiempo hasta el primer byte es el real
+    # y un fallo de arranque se devuelve como error HTTP (con el 200 ya enviado no se puede).
+    try:
+        first_chunk = await asyncio.wait_for(
+            proc.stdout.read(STREAMLINK_CHUNKSIZE),
+            timeout=30.0
+        )
+    except asyncio.TimeoutError:
+        logger.error("Timeout esperando el primer chunk de streamlink")
+        await cleanup()
+        raise HTTPException(504, "Timeout esperando el stream")
+    except BaseException:
+        await cleanup()
+        raise
+
+    if not first_chunk:
+        await cleanup()
+        logger.error(f"Streamlink terminó sin emitir datos, código: {proc.returncode}")
+        logger.error(f"Error output: {error_output}")
+        raise HTTPException(500, f"Streamlink falló: {error_output}")
+
+    async def stream_generator():
+        chunks_sent = 1
+
+        try:
+            yield first_chunk
 
             while not proc.stdout.at_eof():
                 try:
@@ -100,7 +144,6 @@ async def stream_video(request: Request):
                         break
                 except asyncio.TimeoutError:
                     logger.error("Timeout leyendo del stream")
-                    await asyncio.sleep(2)
                     break
                 except Exception as e:
                     logger.error(f"Error leyendo chunk: {str(e)}")
@@ -110,21 +153,7 @@ async def stream_video(request: Request):
             logger.error(f"Error en stream generator: {str(e)}")
             raise
         finally:
-            # Cleanup del proceso
-            if proc.returncode is None:
-                try:
-                    logger.info("Terminando proceso streamlink...")
-                    proc.terminate()
-                    try:
-                        await asyncio.wait_for(proc.wait(), timeout=5.0)
-                    except asyncio.TimeoutError:
-                        logger.warning("Forzando terminación de streamlink...")
-                        proc.kill()
-                        await proc.wait()
-                except ProcessLookupError:
-                    pass
-                except Exception as e:
-                    logger.error(f"Error terminando proceso: {str(e)}")
+            await cleanup()
             
             duration = datetime.now() - start_time
             logger.info(f"Stream finalizado - Duración: {duration}, Chunks enviados: {chunks_sent}")

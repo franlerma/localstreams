@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import shutil
 import logging
 from datetime import datetime
@@ -8,6 +9,9 @@ from config import STREAMLINK_CHUNKSIZE
 
 router = APIRouter()
 logger = logging.getLogger("LocalStreams.hls_mux")
+
+# Solo se conserva el final de stderr: un stream largo no debe acumular memoria
+STDERR_TAIL_BYTES = 8192
 
 @router.get("/hls/mux")
 async def mux_hls_streams(request: Request):
@@ -38,6 +42,9 @@ async def mux_hls_streams(request: Request):
     # Comando FFmpeg para remultiplexar streams HLS
     cmd = [
         ffmpeg_path,
+        '-hide_banner',
+        '-loglevel', 'warning',  # Solo avisos y errores
+        '-nostats',  # Sin línea de progreso en stderr
         '-i', video_url,
         '-i', audio_url,
         '-c', 'copy',  # Copy sin recodificar
@@ -58,34 +65,75 @@ async def mux_hls_streams(request: Request):
         logger.error(f"Error al iniciar FFmpeg: {str(e)}")
         raise HTTPException(500, f"Error al iniciar FFmpeg: {str(e)}")
     
+    error_output = ""
+
+    # Leer stderr en paralelo (solo se guarda el final)
+    async def read_stderr():
+        nonlocal error_output
+        tail = b""
+        try:
+            while True:
+                data = await proc.stderr.read(4096)
+                if not data:
+                    break
+                tail = (tail + data)[-STDERR_TAIL_BYTES:]
+        except Exception as e:
+            logger.error(f"Error leyendo stderr: {str(e)}")
+        if tail:
+            error_output = tail.decode('utf-8', errors='ignore')
+            logger.debug(f"FFmpeg stderr: {error_output}")
+
+    async def terminate_process():
+        if proc.returncode is None:
+            try:
+                logger.info("Terminando proceso FFmpeg...")
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Forzando terminación de FFmpeg...")
+                    proc.kill()
+                    await proc.wait()
+            except ProcessLookupError:
+                pass
+            except Exception as e:
+                logger.error(f"Error terminando proceso: {str(e)}")
+
+    stderr_task = asyncio.create_task(read_stderr())
+
+    async def cleanup():
+        await terminate_process()
+        # Dejar que stderr termine de leerse; si no acaba, wait_for cancela la tarea
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(stderr_task, timeout=5.0)
+
+    # Leer el primer chunk antes de responder: el tiempo hasta el primer byte es el real
+    # y un fallo de arranque se devuelve como error HTTP (con el 200 ya enviado no se puede).
+    try:
+        first_chunk = await asyncio.wait_for(
+            proc.stdout.read(STREAMLINK_CHUNKSIZE),
+            timeout=30.0
+        )
+    except asyncio.TimeoutError:
+        logger.error("Timeout esperando el primer chunk de FFmpeg")
+        await cleanup()
+        raise HTTPException(504, "Timeout esperando el stream")
+    except BaseException:
+        await cleanup()
+        raise
+
+    if not first_chunk:
+        await cleanup()
+        logger.error(f"FFmpeg terminó sin emitir datos, código: {proc.returncode}")
+        logger.error(f"Error output: {error_output}")
+        raise HTTPException(500, f"FFmpeg falló: {error_output}")
+
     async def stream_generator():
-        error_output = ""
-        chunks_sent = 0
+        chunks_sent = 1
         
         try:
-            # Leer stderr en paralelo
-            async def read_stderr():
-                nonlocal error_output
-                try:
-                    stderr_data = await proc.stderr.read()
-                    if stderr_data:
-                        error_output = stderr_data.decode('utf-8', errors='ignore')
-                        logger.debug(f"FFmpeg stderr: {error_output}")
-                except Exception as e:
-                    logger.error(f"Error leyendo stderr: {str(e)}")
-            
-            stderr_task = asyncio.create_task(read_stderr())
-            
-            # Dar tiempo a FFmpeg para inicializarse
-            await asyncio.sleep(3)
-            
-            # Verificar si el proceso sigue vivo
-            if proc.returncode is not None:
-                await stderr_task
-                logger.error(f"FFmpeg terminó prematuramente con código: {proc.returncode}")
-                logger.error(f"Error output: {error_output}")
-                raise HTTPException(500, f"FFmpeg falló: {error_output}")
-            
+            yield first_chunk
+
             while not proc.stdout.at_eof():
                 try:
                     chunk = await asyncio.wait_for(
@@ -102,7 +150,6 @@ async def mux_hls_streams(request: Request):
                         break
                 except asyncio.TimeoutError:
                     logger.error("Timeout leyendo del stream muxeado")
-                    await asyncio.sleep(2)
                     break
                 except Exception as e:
                     logger.error(f"Error leyendo chunk: {str(e)}")
@@ -112,21 +159,7 @@ async def mux_hls_streams(request: Request):
             logger.error(f"Error en stream generator: {str(e)}")
             raise
         finally:
-            # Cleanup del proceso
-            if proc.returncode is None:
-                try:
-                    logger.info("Terminando proceso FFmpeg...")
-                    proc.terminate()
-                    try:
-                        await asyncio.wait_for(proc.wait(), timeout=5.0)
-                    except asyncio.TimeoutError:
-                        logger.warning("Forzando terminación de FFmpeg...")
-                        proc.kill()
-                        await proc.wait()
-                except ProcessLookupError:
-                    pass
-                except Exception as e:
-                    logger.error(f"Error terminando proceso: {str(e)}")
+            await cleanup()
             
             duration = datetime.now() - start_time
             logger.info(f"Stream HLS mux finalizado - Duración: {duration}, Chunks enviados: {chunks_sent}")

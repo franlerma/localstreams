@@ -7,6 +7,8 @@ COMPOSE_FILE = $(MAKEFILE_DIR)docker-compose.yml
 SERVICE_NAME = localstreams
 IMAGE_NAME = franlerma/localstreams
 PROFILE = vpn-mullvad
+# Imágenes del stack que acexy usa/crea en tiempo de ejecución (engines AceStream y Outpace)
+STACK_IMAGES = franlerma/acexy franlerma/acestream-vpn-switch franlerma/outpace-vpn-switch
 
 # Ayuda por defecto
 help: ## Mostrar esta ayuda
@@ -24,9 +26,9 @@ clean-old-images: ## Limpiar imágenes viejas de localstreams
 	@docker rmi $(docker images $(IMAGE_NAME) -q) 2>/dev/null || echo "No hay imágenes viejas que limpiar"
 	@echo "Limpieza completada"
 
-clean-images: down ## Borrar imágenes locales de acexy y acestream-vpn-switch (baja antes el stack)
-	@echo "Borrando imágenes locales de acexy y acestream-vpn-switch..."
-	@for img in franlerma/acexy franlerma/acestream-vpn-switch; do \
+clean-images: down ## Borrar imágenes locales de acexy, acestream-vpn-switch y outpace-vpn-switch (baja antes el stack)
+	@echo "Borrando imágenes locales: $(STACK_IMAGES)..."
+	@for img in $(STACK_IMAGES); do \
 		ids=$$(docker images $$img -q 2>/dev/null); \
 		if [ -n "$$ids" ]; then \
 			docker rmi -f $$ids 2>/dev/null && echo "Imagen eliminada: $$img" || echo "$$img: no se pudo eliminar"; \
@@ -38,13 +40,11 @@ clean-images: down ## Borrar imágenes locales de acexy y acestream-vpn-switch (
 
 # Docker Compose
 buildup: volumes-create build ## Levantar los servicios con docker compose (perfil por defecto: vpn)
-	docker pull franlerma/acexy:latest
-	docker pull franlerma/acestream-vpn-switch:latest
+	@for img in $(STACK_IMAGES); do docker pull $$img:latest || exit 1; done
 	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} up -d --force-recreate
 
 up: volumes-create ## Levantar los servicios con docker compose (perfil por defecto: vpn)
-	docker pull franlerma/acexy:latest
-	docker pull franlerma/acestream-vpn-switch:latest
+	@for img in $(STACK_IMAGES); do docker pull $$img:latest || exit 1; done
 	docker compose -f $(COMPOSE_FILE) --profile ${PROFILE} up -d --force-recreate
 
 down: volumes-clean ## Detener y eliminar los servicios

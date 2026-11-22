@@ -1,8 +1,6 @@
 x-localstreams-env: &localstreams-env
   ACESTREAM_PROXY_PORT: "8080"
-  ACESTREAM_POLL_TIME: "0"
-  ACESTRAM_RETRY_TOTAL: "10"
-  APP_LOG_LEVEL: "DEBUG"
+  APP_LOG_LEVEL: "INFO"
 
 x-localstreams-base: &localstreams-base
   image: franlerma/localstreams
@@ -10,7 +8,6 @@ x-localstreams-base: &localstreams-base
   ports:
     - "15123:15123"
   volumes:
-    - /dev/dri:/dev/dri
     - /opt/docker/volumes/localstreams/m3u:/data/m3u
     - /opt/docker/volumes/localstreams/picon:/data/picon
     - /opt/docker/volumes/localstreams/tmp:/tmp/acestream-cache
@@ -42,10 +39,10 @@ x-acexy-env: &acexy-env
   ACEXY_ACESTREAM_DNS_SERVERS: "85.208.114.52"
 
   # Orchestrator config
-  ACESTREAM_MIN_REPLICAS: "1"
+  ACESTREAM_MIN_REPLICAS: "2"
   ACESTREAM_MAX_REPLICAS: "5"
   ACESTREAM_STREAMS_PER_INSTANCE: "3"
-  ACESTREAM_IDLE_TIMEOUT: "5s"
+  ACESTREAM_IDLE_TIMEOUT: "60s"
   ACESTREAM_RECYCLE_TIMEOUT: "15s"
   ACESTREAM_IMAGE: franlerma/outpace-vpn-switch:latest
   # Outpace usa "outpace serve" (no los flags del engine de AceStream) y solo
