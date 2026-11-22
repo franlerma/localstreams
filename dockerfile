@@ -26,7 +26,6 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ffmpeg \
         wget \
-        curl \
         ca-certificates \
         # Dependencias para Playwright/Chromium
         libnss3 \
